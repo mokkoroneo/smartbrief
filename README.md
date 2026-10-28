@@ -6,7 +6,7 @@
 ![Infrastructure](https://img.shields.io/badge/Infra-Docker_%7C_Cloudflare-orange)
 ![Security](https://img.shields.io/badge/Security-A%2B_Rating-success)
 
->### 🚀 Project Status: v2.0 メジャーアップデート完了 (2026.01)
+>### 🚀 Project Status: v3.0 メジャーアップデート完了 (2026.01)
 >
 >本プロジェクトは、個人開発の枠を超え、**商用利用を前提としたSaaSプロダクト**として設計・開発・デプロイを完了しました。
 >
@@ -30,8 +30,8 @@ v2.0では、**「切なくて涙が出る物語」「仕事に疲れた時に�
 
 | プラン | ID / Email | Pass | 想定利用シーン |
 | :--- | :--- | :--- | :--- |
-| **💎 Premium** | Email: `guest.pre@example.com` | `Test@2025` | **AI感情検索（理由表示）・翻訳全文・高品質要約**を含むフル機能を体験いただけます。 |
-| **🌱 Free** | Email: `guest.free@example.com` | `Test@2025` | 無料会員の制限（**1日10回制限**）や、課金への導線を確認できます。 |
+| **💎 Premium** | Email: `guest.pre@example.com` | お問い合わせいただければお伝えします | **AI感情検索（理由表示）・翻訳全文・高品質要約**を含むフル機能を体験いただけます。 |
+| **🌱 Free** | Email: `guest.free@example.com` | お問い合わせいただければお伝えします | 無料会員の制限（**1日10回制限**）や、課金への導線を確認できます。 |
 
 ---
 
