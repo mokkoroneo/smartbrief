@@ -1,7 +1,7 @@
 # SmartBrief System Architecture (Public Overview)
 
-**Version:** 2.0 (Release Candidate)
-**Last Updated:** 2025-12
+**Version:** 2.1
+**Last Updated:** 2026-11
 **Status:** Production Ready
 
 > **Note**
@@ -46,6 +46,14 @@ graph TD
     subgraph "Application Core (Docker)"
         BE -->|Async R2DBC| MySQL[("MySQL 8.0")]
         BE -->|Subscription Logic| Stripe[Stripe API]
+
+        BE -->|Vector Search| SearchAPI[Go Search API]
+
+        SearchAPI -->|Embedding| Ollama[Ollama / mxbai-embed-large]
+
+        SearchAPI -->|Vector Store| Qdrant[(Qdrant Vector DB)]
+
+        SearchAPI -->|Reasoning| Groq[Groq / Llama 3.1]
         BE -->|Async Mail Request| n8n_mail["n8n (Email Service)"]
         n8n_mail -->|OAuth2| Gmail[Gmail API]
     end
@@ -60,15 +68,15 @@ graph TD
 
     classDef container fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
     classDef external fill:#fff3e0,stroke:#ff6f00,stroke-width:2px;
-    class FE,BE,n8n_bot,n8n_mail,n8n_batch,MySQL container;
-    class User,Stripe,Gutenberg,Vertex,OpenAI,LINE,Gmail,CF external;
+    class FE,BE,n8n_bot,n8n_mail,n8n_batch,MySQL,SearchAPI,Qdrant,Ollama container;
+    class User,Stripe,Gutenberg,Vertex,OpenAI,LINE,Gmail,CF,Groq external;
 ```
 
 ---
 
 ## 3. バックエンド設計 (Backend Design)
 
-**Tech Stack:** Java 21, Spring Boot 3 (WebFlux), Spring Security, R2DBC
+**Tech Stack:** Java 21, Spring Boot 3.5 (WebFlux), Spring Security, R2DBC
 
 ### 3.1 リアクティブ・アーキテクチャ (High Performance)
 I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性を考慮し、スレッドをブロックしない **Non-blocking I/O** アーキテクチャを採用しています。これにより、最小限のリソースで大量の同時リクエストを処理可能です。
@@ -166,12 +174,16 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
   - `X-Content-Type-Options: nosniff`: MIMEスニフィング防止
   - `X-Frame-Options: SAMEORIGIN`: クリックジャッキング防止
 
+- **Rate Limiting:** 認証系エンドポイント（ログイン／登録／パスワードリセット／認証メール再送）に対し、実IP（CF-Connecting-IP）基準で10回/分の制限をアプリ層（WebFilter）で実施。超過時は 429 と `Retry-After` ヘッダを返却。
+
+- **Account Enumeration Protection:** パスワードリセット／認証メール再送は、登録の有無やアカウント状態にかかわらず同一のステータス・本文を返し、メールアドレスの存在を秘匿。
+
 ---
 
 ### 付録: 開発・運用環境
 
 - **Repository:** GitHub (Feature Branch Flow)
-- **CI/CD:** GitHub Actions (Lint / Test / Build)
+- **Deployment:** Docker Compose による手動デプロイ（GitHub Actions による CI/CD 自動化は今後の課題）
 - **Monitoring:** Cloudflare Analytics, Docker Container Logs
 
 ---
