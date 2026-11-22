@@ -47,8 +47,8 @@ SaaSの生命線である「認証」と「決済」を極限まで堅牢化し�
 - **CSP（Content-Security-Policy）の全面適用**: 全ページに適用し、読み込み可能なリソースを自ドメインと必要な外部フォント等に限定。
 
 <p align="center">
-  <img width="48%" alt="SSL Labs A+ Rating" src="https://github.com/user-attachments/assets/4d0dbc3c-9cce-471b-949a-8ff2fd38f26b" />
-  <img width="48%" alt="Security Headers" src="https://github.com/user-attachments/assets/66809a53-ccf5-4dda-8d67-9acf965ef6ad" />
+  <img width="48%" alt="SSL Labs A+ Rating" src="docs/images/ssl-labs.png" />
+  <img width="48%" alt="Security Headers" src="docs/images/security-headers.png" />
   <br>
   <em>▲ 第三者機関（Qualys SSL Labs）による最高評価「A+」および、TLS 1.3 / HSTSの強制適用証明</em>
 </p>
