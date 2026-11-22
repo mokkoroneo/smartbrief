@@ -42,7 +42,7 @@ dependencies {
     testImplementation 'org.springframework.security:spring-security-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     
-    // Stripe Java SDK (ここが追加分です)
+    // Stripe Java SDK
     implementation 'com.stripe:stripe-java:28.0.0'
     
     // JWT (JSON Web Token) library

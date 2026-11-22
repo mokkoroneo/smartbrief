@@ -112,7 +112,7 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
 
 ## 4. フロントエンド設計 (Frontend Design)
 
-**Tech Stack:** React 19, React Router v7, Vite (rolldown-vite), CSS（global）+ theme.js
+**Tech Stack:** React 19, TypeScript 5.9, React Router v7, Zustand 5, Vite (rolldown-vite), CSS（global）+ theme.ts
 
 ### 4.1 UX Optimization
 - **Optimistic UI:** データのロード完了を待たずにスケルトンスクリーンを表示し、体感速度を向上。
