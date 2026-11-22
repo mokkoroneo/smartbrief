@@ -68,7 +68,7 @@ public class BookResponse {
         dto.setOriginalTitle(cleanText(work.getOriginalTitle()));
         
         // 互換性維持用
-        dto.setSummaryHq(cleanText(work.getSummaryHq()));
+        dto.setSummaryHq(isPremiumUser ? cleanText(work.getSummaryHq()) : null); // ★この1行だけ書き換える！
         dto.setSummary300(cleanText(work.getSummary300()));
 
         // 2. AI検索データのマッピング（追加部分）

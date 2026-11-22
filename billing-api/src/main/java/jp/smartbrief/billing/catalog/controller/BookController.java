@@ -193,22 +193,25 @@ public class BookController {
             @RequestParam(name = "offset", defaultValue = "0") int offset,
             @RequestParam(name = "sort", required = false) String sort,
             @AuthenticationPrincipal User user) {
+        
+        int safeLimit = Math.clamp(limit, 1, 100);
+        int safeOffset = Math.max(offset, 0);
 
         UserContext context = UserContext.from(user);
         boolean isLengthDesc = "length_desc".equalsIgnoreCase(sort);
 
         Flux<Work> worksFlux;
 
-        if ("translation".equalsIgnoreCase(type)) {
+if ("translation".equalsIgnoreCase(type)) {
             worksFlux = isLengthDesc 
-                    ? workRepository.findByCategoryOrderByLength("Gutenberg", limit, offset)
-                    : workRepository.findByCategory("Gutenberg", limit, offset);
+                    ? workRepository.findByCategoryOrderByLength("Gutenberg", safeLimit, safeOffset) // ★1箇所目
+                    : workRepository.findByCategory("Gutenberg", safeLimit, safeOffset);             // ★2箇所目
         } else {
             if (query == null || query.isBlank()) return Mono.just(ResponseEntity.ok(List.of()));
             String searchPattern = "%" + query.trim() + "%";
             worksFlux = isLengthDesc
-                    ? workRepository.searchByKeywordOrderByLength(searchPattern, limit, offset)
-                    : workRepository.searchByKeyword(searchPattern, limit, offset);
+                    ? workRepository.searchByKeywordOrderByLength(searchPattern, safeLimit, safeOffset) // ★3箇所目
+                    : workRepository.searchByKeyword(searchPattern, safeLimit, safeOffset);             // ★4箇所目
         }
 
         return worksFlux
@@ -225,14 +228,16 @@ public class BookController {
             @RequestParam(name = "offset", defaultValue = "0") int offset,
             @RequestParam(name = "sort", required = false) String sort,
             @AuthenticationPrincipal User user) {
+        
+        int safeLimit = Math.clamp(limit, 1, 100);
+        int safeOffset = Math.max(offset, 0);
 
         UserContext context = UserContext.from(user);
         String searchPattern = "%" + genre.trim() + "%";
 
         Flux<Work> worksFlux = "length_desc".equalsIgnoreCase(sort)
-                ? workRepository.findByGenreTagContainingOrderByLength(searchPattern, limit, offset)
-                : workRepository.findByGenreTagContaining(searchPattern, limit, offset);
-
+                ? workRepository.findByGenreTagContainingOrderByLength(searchPattern, safeLimit, safeOffset) // ★5箇所目
+                : workRepository.findByGenreTagContaining(searchPattern, safeLimit, safeOffset);             // ★6箇所目
         return worksFlux
                 .map(work -> BookResponse.from(work, context.isPremium()))
                 .collectList()
