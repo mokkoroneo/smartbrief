@@ -1,16 +1,16 @@
 # 📚 SmartBrief - AI要約 & 翻訳SaaSプラットフォーム (v3.0)
 
-![Java](https://img.shields.io/badge/Java_21-Spring_Boot_3-green)
-![Go](https://img.shields.io/badge/Go_1.24-Search_Service-00ADD8)
+![Java](https://img.shields.io/badge/Java_21-Spring_Boot_3.5-green)
+![Go](https://img.shields.io/badge/Go_1.26-Search_Service-00ADD8)
 ![React](https://img.shields.io/badge/React_19-TS_%7C_Zustand-blue)
 ![Infrastructure](https://img.shields.io/badge/Infra-Docker_%7C_Cloudflare-orange)
 ![Security](https://img.shields.io/badge/Security-A%2B_Rating-success)
 
 >### 🚀 Project Status: v3.0 メジャーアップデート完了 (2026.01)
 >
->本プロジェクトは、個人開発の枠を超え、**商用利用を前提としたSaaSプロダクト**として設計・開発・デプロイを完了しました。
+>本プロジェクトは、個人開発の枠を超え、**商用利用を前提としたSaaSプロダクト**として設計・開発・デプロイしました。課金機能（Stripe連携）は実装済みで、正式な有料プランの提供は準備中です。
 >
->従来のキーワード検索を刷新し、`Gemini AI`と`ベクトルデータベース`を統合した「AI感情検索」を実装。
+>従来のキーワード検索を刷新し、ベクトル検索（Ollama埋め込み＋Qdrant）と`Groq`による理由生成を統合した「AI感情検索」を実装。
 >さらに、**HttpOnly Cookie**によるセキュアな認証、**Stripe Webhookの冪等性**担保、
 >**Goroutine**による超高速AI推論を実現し、モダンかつ堅牢なアーキテクチャを完遂しています。
 
@@ -35,13 +35,16 @@ v2.0では、**「切なくて涙が出る物語」「仕事に疲れた時に�
 ### 1. 🧠 Hybrid RAG: ローカルGPUとクラウドAIの融合
 コストと速度を両立するため、RAG（検索拡張生成）の工程を最適化しました。
 - **Local Embedding (Ollama)**: RTX 3070のGPUリソースを活用。`mxbai-embed-large`モデルを自前運用し、1.7万件の蔵書を**完全無料・プライバシー重視**でベクトル化。
-- **超高速並列推論 (Groq + Go)**: 検索結果に基づく「おすすめ理由」の生成には、世界最速級の推論エンジン「Groq (Llama 3)」を採用。Goの `Goroutine` による並列処理で10冊分のAI推論を同時に行い、**わずか1秒台でユーザーへ提示**します。
+- **超高速並列推論 (Groq + Go)**: 検索結果に基づく「おすすめ理由」の生成には、世界最速級の推論エンジン「Groq (Llama 3.1)」を採用。Goの `Goroutine` による並列処理で10冊分のAI推論を同時に行い、**わずか1秒台でユーザーへ提示**します。
 
 ### 2. 🛡️ エンタープライズ品質のセキュリティ & 決済基盤
 SaaSの生命線である「認証」と「決済」を極限まで堅牢化しました。
-- **XSS完全防御 (HttpOnly Secure Cookie)**: JWTトークンを `localStorage` から排除。ブラウザのセキュリティ機構（SameSite=Lax/Strict）を活用し、悪意あるスクリプトからのトークン窃取を物理的に無効化。
-- **Stripeの冪等性 (Idempotency) 担保**: ネットワーク遅延等によるWebhookの重複送信に対し、DB側でイベントIDを記録して排他制御 (`@Transactional`) を実行。二重決済や不正な契約延長を100%防止。
+- **XSS完全防御 (HttpOnly Secure Cookie)**: JWTトークンを `localStorage` から排除。ブラウザのセキュリティ機構（SameSite=Lax）を活用し、悪意あるスクリプトからのトークン窃取を物理的に無効化。
+- **Stripeの冪等性 (Idempotency) 担保**: ネットワーク遅延等によるWebhookの重複送信に対し、処理済みイベントIDの記録とプラン更新を同一トランザクションで実行し、重複イベントを冪等に処理。二重の契約延長を防止します。
 - **Zero Trust Network**: Cloudflare Tunnelによりインバウンドポートを全閉鎖。DDoS攻撃やポートスキャンを遮断し、Qualys SSL Labsにて最高評価「A+」を獲得。
+- **認証系APIのレート制限**: ログイン・登録・パスワードリセット等に対し、実IP（CF-Connecting-IP）基準で10回/分の制限をアプリ層に実装し、総当たりや探索行為を遮断。
+- **アカウント列挙対策**: パスワードリセット／認証メール再送では、登録の有無にかかわらず同一の応答を返し、メールアドレスの存在を秘匿。
+- **CSP（Content-Security-Policy）の全面適用**: 全ページに適用し、読み込み可能なリソースを自ドメインと必要な外部フォント等に限定。
 
 <p align="center">
   <img width="48%" alt="SSL Labs A+ Rating" src="https://github.com/user-attachments/assets/4d0dbc3c-9cce-471b-949a-8ff2fd38f26b" />
@@ -52,7 +55,7 @@ SaaSの生命線である「認証」と「決済」を極限まで堅牢化し�
 
 ### 3. 🏗️ マルチ言語マイクロサービス・アーキテクチャ
 役割に応じた言語選択（Polyglot）により、システム全体のパフォーマンスと保守性を最大化。
-- **Go Search Microservice (Go 1.24)**: 計算資源の効率化と並列処理に長けたGo言語で、AI検索エンジンを独立。
+- **Go Search Microservice (Go 1.26)**: 計算資源の効率化と並列処理に長けたGo言語で、AI検索エンジンを独立。
 - **Orchestration (Java 21 / Spring WebFlux)**: 認証、トランザクション、R2DBC（非同期DB）によるドメインロジックを統括。
 - **Frontend (React 19 / TS / Zustand)**: コンパイル時の型安全性と、ZustandによるProp DrillingのないモダンなUI状態管理。
 
@@ -77,7 +80,7 @@ SaaSの生命線である「認証」と「決済」を極限まで堅牢化し�
 graph TD
     %% 既存のアクセス層
     User((User)) -->|HTTPS| CF[Cloudflare] --> FE[React Frontend]
-    FE -->|REST API| BE[Spring Boot 3 / Java 21]
+    FE -->|REST API| BE[Spring Boot 3.5 / Java 21]
 
     %% マイクロサービス連携
     BE -->|Async WebClient| SearchAPI[Go Search API]
@@ -122,6 +125,10 @@ graph TD
 
 SaaSとしての基盤は完成しましたが、技術的探求とユーザー体験の向上は続きます。
 
-- **🦀 Rust化への挑戦**: さらなるメモリフットプリントの削減と極限のI/O性能を追求するため、Goで実装されている検索マイクロサービスを **Rust (Tokio + Axum)** へリプレイス予定。
+- **🦀 Rust実装の検証（準備中）**: Goで実装されている検索マイクロサービスについて、Rust 実装を用意し、Go版との挙動の違いを比較検証する取り組みを準備中。
 - **🔊 音声読み上げ機能**: Azure AI Speech等のAPIを用いたオーディオブック化。
 - **⚡ Performance**: `TanStack Query (React Query)` 導入によるサーバー状態のキャッシュ管理。
+
+## ドキュメント
+
+- 詳細な設計・セキュリティ仕様は [システムアーキテクチャ設計書](docs/system-architecture-public.md) にまとめています。
