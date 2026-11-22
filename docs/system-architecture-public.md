@@ -61,8 +61,8 @@ graph TD
     %% コンテンツ生成ファクトリー
     subgraph "Content Factory (n8n Pipeline)"
         n8n_batch[n8n Batch Workflow] -->|1. Fetch| Gutenberg[Project Gutenberg]
-        n8n_batch -->|2. Translate| Vertex["Google Vertex AI<br/>(Gemini 1.5)"]
-        n8n_batch -->|3. Summarize| OpenAI["OpenAI API<br/>(GPT-5 Nano)"]
+        n8n_batch -->|2. Translate| Vertex["Google Vertex AI<br/>(Gemini 4)"]
+        n8n_batch -->|3. Summarize| OpenAI["OpenAI API<br/>(GPT-5.6 Luna)"]
         n8n_batch -->|4. Upsert| MySQL
     end
 
@@ -142,8 +142,8 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
 手動運用ゼロを目指し、n8n をオーケストレーターとして以下のバッチ処理を定期実行しています。
 
 1. **Source Acquisition:** Project Gutenberg / 青空文庫からパブリックドメイン作品を自動収集。
-2. **Context-Aware Translation:** 長文脈に強い **Gemini 1.5 (Vertex AI)** を使用し、作品全体のトーンを維持した自然な翻訳を実行。
-3. **Summarization:** **GPT-5 Nano** により、3段階（キャッチコピー・要約・解説）のメタデータを生成。
+2. **Context-Aware Translation:** 長文脈に強い **Gemini 4 (Vertex AI)** を使用し、作品全体のトーンを維持した自然な翻訳を実行。
+3. **Summarization:** **GPT-5.6 Luna** により、3段階（キャッチコピー・要約・解説）のメタデータを生成。
 4. **Data Upsert:** 生成結果を MySQL に格納し、即座にフロントエンドへ反映。
 
 ### 5.2 疎結合なメッセージング (Decoupled Messaging)
