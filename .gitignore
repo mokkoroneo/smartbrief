@@ -71,3 +71,6 @@ qdrant_data/
 mysql_data/
 !billing-api/db/migrations/*.sql
 !billing-api/src/main/resources/schema.sql
+# Track SmartBrief shared/config package (bare 'config' pattern swallows it)
+!billing-api/src/main/java/jp/smartbrief/billing/shared/config/
+!billing-api/src/main/java/jp/smartbrief/billing/shared/config/*.java

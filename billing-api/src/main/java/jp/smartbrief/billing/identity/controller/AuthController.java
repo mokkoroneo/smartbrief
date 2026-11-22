@@ -25,6 +25,7 @@ import org.springframework.http.server.reactive.ServerHttpResponse;
 import jp.smartbrief.billing.identity.domain.User;
 import jp.smartbrief.billing.identity.repository.UserRepository;
 import jp.smartbrief.billing.shared.security.JwtUtil;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
 /**
@@ -32,9 +33,15 @@ import reactor.core.publisher.Mono;
  * VS Codeの厳格なNull安全性警告を回避するため、
  * 引数や定数を Objects.requireNonNull() でラップして型安全性を保証しています。
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
+
+    private static final String FORGOT_PASSWORD_UNIFORM_MESSAGE =
+            "ご入力のメールアドレスが登録されている場合、パスワード再設定用のメールを送信しました。";
+    private static final String RESEND_VERIFICATION_UNIFORM_MESSAGE =
+            "ご入力のメールアドレスが未認証で登録されている場合、認証メールを再送しました。受信トレイをご確認ください。";
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -199,22 +206,24 @@ public class AuthController {
                 user.setResetPasswordExpiresAt(LocalDateTime.now().plusHours(1));
 
                 return userRepository.save(user)
-                    .flatMap(savedUser -> {
-                        return WebClient.create()
-                            .post()
-                            .uri(Objects.requireNonNull(n8nEmailWebhookUrl))
-                            .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON)) // ★ラップ
-                            .bodyValue(Objects.requireNonNull(Map.of(
-                                "email", savedUser.getEmail(),
-                                "username", savedUser.getUsername(),
-                                "resetToken", token
-                            )))
-                            .retrieve()
-                            .toBodilessEntity()
-                            .thenReturn(createResponse("パスワード再設定メールを送信しました。", HttpStatus.OK));
-                    });
+                    .flatMap(savedUser -> WebClient.create()
+                        .post()
+                        .uri(Objects.requireNonNull(n8nEmailWebhookUrl))
+                        .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON))
+                        .bodyValue(Objects.requireNonNull(Map.of(
+                            "email", savedUser.getEmail(),
+                            "username", savedUser.getUsername(),
+                            "resetToken", token
+                        )))
+                        .retrieve()
+                        .toBodilessEntity()
+                        .thenReturn(createResponse(FORGOT_PASSWORD_UNIFORM_MESSAGE, HttpStatus.OK))
+                        .onErrorResume(ex -> {
+                            log.error("Failed to send password reset webhook for userId={}", savedUser.getId(), ex);
+                            return Mono.just(createResponse(FORGOT_PASSWORD_UNIFORM_MESSAGE, HttpStatus.OK));
+                        }));
             })
-            .switchIfEmpty(Mono.just(createResponse("そのメールアドレスは登録されていません。", HttpStatus.NOT_FOUND)));
+            .switchIfEmpty(Mono.just(createResponse(FORGOT_PASSWORD_UNIFORM_MESSAGE, HttpStatus.OK)));
     }
 
     // --- 4. パスワードリセット実行 ---
@@ -260,7 +269,7 @@ public class AuthController {
         return userRepository.findByEmail(email)
             .flatMap(user -> {
                 if (Boolean.TRUE.equals(user.getIsVerified())) {
-                    return Mono.just(createResponse("このメールアドレスは既に認証済みです。ログインしてください。", HttpStatus.BAD_REQUEST));
+                    return Mono.just(createResponse(RESEND_VERIFICATION_UNIFORM_MESSAGE, HttpStatus.OK));
                 }
 
                 String newToken = UUID.randomUUID().toString();
@@ -271,7 +280,7 @@ public class AuthController {
                         WebClient.create()
                             .post()
                             .uri(Objects.requireNonNull(n8nVerifyEmailWebhookUrl))
-                            .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON)) // ★ラップ
+                            .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON))
                             .bodyValue(Objects.requireNonNull(Map.of(
                                 "email", savedUser.getEmail(),
                                 "username", savedUser.getUsername(),
@@ -279,12 +288,15 @@ public class AuthController {
                             )))
                             .retrieve()
                             .toBodilessEntity()
-                            .subscribe();
+                            .subscribe(
+                                unused -> {},
+                                ex -> log.error("Failed to send resend-verification webhook for userId={}", savedUser.getId(), ex)
+                            );
 
-                        return Mono.just(createResponse("認証メールを再送しました。受信トレイを確認してください。", HttpStatus.OK));
+                        return Mono.just(createResponse(RESEND_VERIFICATION_UNIFORM_MESSAGE, HttpStatus.OK));
                     });
             })
-            .switchIfEmpty(Mono.just(createResponse("そのメールアドレスは登録されていません。", HttpStatus.NOT_FOUND)));
+            .switchIfEmpty(Mono.just(createResponse(RESEND_VERIFICATION_UNIFORM_MESSAGE, HttpStatus.OK)));
     }
 
     // --- 自分のユーザー情報を取得するAPI ---

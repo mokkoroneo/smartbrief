@@ -86,19 +86,19 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
 ### 3.3 データモデル設計 (Data Modeling)
 **Spring Data R2DBC** を用いた非同期データアクセス層を構築。
 
-- **User:** 認証情報、サブスクリプション状態、Stripe Customer ID を一元管理。
+- **User:** 認証情報、サブスクリプション状態、Stripe Customer ID に加え、無料会員の「本日分の閲覧回数」（`daily_view_count` / `last_view_date`）を条件付きアトミック UPDATE で一元管理。
 - **Work:** 翻訳本文、要約（Short/Long）、メタデータを格納。
 - **UserBookHistory:**
-  - ユーザーごとの閲覧履歴と「本日分の閲覧回数」を管理。
-  - **重複排除ロジック:** 短時間の連続アクセスを1回とみなす制御を実装し、閲覧権限の不正消費を防止。
+  - ユーザーごとの閲覧履歴を管理（日次カウンター更新と同一トランザクションで記録）。
+  - **重複排除ロジック:** 直近60秒以内の同一書籍への連続アクセス時は閲覧回数の消費・履歴記録をスキップし、閲覧権限の不正消費を防止。
 
 ### 3.4 決済・サブスクリプション連携 (Payment Integration)
 - **Stripe Integration:**
   - Checkout Session によるセキュアなカード情報入力。
   - Billing Portal によるユーザー主導の契約変更・解約フロー。
 - **Idempotency (冪等性):**
-  - Stripe Webhook（`invoice.payment_succeeded` 等）処理において、イベントIDの重複チェックを実装。
-  - ネットワーク遅延等によるWebhook多重送信時も、契約期間が不正延長されない堅牢なロジックを確立。
+  - Stripe Webhook（`checkout.session.completed` のみ対象）処理において、イベントIDのアトミックな重複排除（`processed_stripe_events` への `INSERT IGNORE`）を実装。
+  - ネットワーク遅延等によるWebhook多重送信時も、重複適用されない堅牢なロジックを確立。
 
 ---
 
@@ -117,12 +117,12 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
 
 - **API Client:** `apiClient` によりAPIアクセスを統一（`/api/v1`、`{ ok, status, data, message }` の共通フォーマットで返却）。
 - **Toast通知:** 成功/失敗/認証切れ（401）などのメッセージ表示をトーストに集約し、画面ごとの実装差を抑制。
-- **JWTの取り扱い:** `authToken` を localStorage に保存し、APIリクエスト時は Authorization ヘッダを自動付与。
-- **レース回避:** ログイン時は **localStorage先書き → state更新** の順序で反映し、ログイン直後に認証判定が先行して401になる事象を抑止。
+- **JWTの取り扱い:** `authToken` はサーバーから **HttpOnly Cookie**（`Secure` / `SameSite=Lax`）として発行し、フロントエンドの `authStore` はトークンを保持せずブラウザの Cookie 自動送信により認証。
+- **状態同期:** 認証状態は `/api/v1/auth/me` の応答に基づいて `authStore` 上のユーザー情報のみを更新し、画面遷移時の不整合を抑止。
 
 ### 4.3 Security Implementation
-- **XSS対策:** React の自動エスケープ機構に加え、Content Security Policy (CSP) でスクリプト実行元を厳密に制限。
-- **機密情報の保護:** LocalStorage にはパスワード等の機密情報を一切保存せず、JWTのみを管理。
+- **XSS対策:** React の自動エスケープ機構に加え、フロントエンド配信層（Nginx）の Content Security Policy (CSP: `default-src 'self'; script-src 'self'` を軸に、Google Fonts および `https://assets.smartbrief.jp` の画像のみ許可) でスクリプト実行元を厳密に制限。
+- **機密情報の保護:** LocalStorage にはパスワードや JWT 等の機密情報を保存せず、認証トークンは HttpOnly Cookie で管理。
 
 ---
 
@@ -162,9 +162,9 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
 ### 6.3 アプリケーションセキュリティ
 - **Environment Isolation:** APIキーやDBパスワードはすべて環境変数（`.env`）で注入し、コードベースから完全に分離。
 - **Security Headers:**
-  - `Content-Security-Policy`: XSS対策
+  - `Content-Security-Policy`: XSS対策（`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https://assets.smartbrief.jp; connect-src 'self'; frame-ancestors 'self'`）
   - `X-Content-Type-Options: nosniff`: MIMEスニフィング防止
-  - `X-Frame-Options: DENY`: クリックジャッキング防止
+  - `X-Frame-Options: SAMEORIGIN`: クリックジャッキング防止
 
 ---
 

@@ -50,5 +50,16 @@ jwt:
 logging:
   level:
     root: INFO
+    jp.smartbrief.billing: INFO
+    org.springframework.r2dbc: INFO
+
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+logging:
+  level:
     jp.smartbrief.billing: DEBUG
     org.springframework.r2dbc: DEBUG
