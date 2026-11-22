@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import jp.smartbrief.billing.identity.domain.User;
+import jp.smartbrief.billing.payment.domain.WebhookProcessResult;
 import jp.smartbrief.billing.payment.service.BillingService;
 
 import com.stripe.exception.EventDataObjectDeserializationException;
@@ -24,15 +25,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
-/**
- * Stripe ウェブフック コントローラー
- * * Stripe からの webhook イベントを受信・処理します。
- * 主にチェックアウトセッション完了イベントを処理し、
- * ユーザーの購読情報をデータベースに保存します。
- */
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/stripe") // ★ クラスはここまで
+@RequestMapping("/api/v1/stripe")
 @RequiredArgsConstructor
 public class StripeWebhookController {
 
@@ -41,70 +36,82 @@ public class StripeWebhookController {
 
     private final BillingService billingService;
 
-    @PostMapping("/webhook") // ★ メソッドで /webhook を指定。これで合計 /api/v1/stripe/webhook
+    @PostMapping("/webhook")
     public Mono<ResponseEntity<String>> handleStripeWebhook(ServerHttpRequest request) {
-        
         return DataBufferUtils.join(request.getBody())
-            .map(dataBuffer -> {
-                try {
-                    byte[] bytes = new byte[dataBuffer.readableByteCount()];
-                    dataBuffer.read(bytes);
-                    return new String(bytes, StandardCharsets.UTF_8);
-                } finally {
-                    DataBufferUtils.release(dataBuffer);
-                }
-            })
-            .flatMap(payload -> {
-                String sigHeader = request.getHeaders().getFirst("Stripe-Signature");
-                
-                // 署名ヘッダーの存在チェック
-                if (sigHeader == null) {
-                    log.error("★ [Webhook] Missing Stripe-Signature header");
-                    return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Missing Signature"));
-                }
-
-                Event event;
-                try {
-                    // 署名の検証
-                    event = Webhook.constructEvent(payload, sigHeader, Objects.requireNonNull(endpointSecret));
-                    log.info("★ [Webhook] Signature Verified. Type: {}", event.getType());
-                } catch (Exception e) {
-                    log.error("★ [Webhook] Signature verification failed!", e);
-                    return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid Signature"));
-                }
-
-                // 決済完了イベントの処理
-                if ("checkout.session.completed".equals(event.getType())) {
+                .map(dataBuffer -> {
                     try {
-                        Session session = (Session) event.getDataObjectDeserializer().deserializeUnsafe();
-                        if (session != null) {
-                            // metadata から userId を抽出 (CheckoutController でセットしたもの)
-                            String userIdStr = session.getMetadata() != null ? session.getMetadata().get("userId") : null;
-                            String customerId = session.getCustomer();
-
-                            if (userIdStr == null) {
-                                log.warn("★ [Webhook] userId not found in session metadata");
-                                return Mono.just(ResponseEntity.ok("User ID missing"));
-                            }
-
-                            log.info("★ [Webhook] SUCCESS! UserID: {}, CustomerID: {}, EventID: {}", userIdStr, customerId, event.getId());
-
-                            // ★★★ 修正箇所：第1引数に event.getId() を追加しました ★★★
-                            return billingService.updateSubscriptionFromWebhook(event.getId(), userIdStr, User.Plan.PREMIUM, customerId)
-                                .map(user -> {
-                                    log.info("★ [Webhook] DB Updated for user: {}", user.getUsername());
-                                    return ResponseEntity.ok("Success");
-                                })
-                                .defaultIfEmpty(ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found"));
-                        }
-                    } catch (EventDataObjectDeserializationException e) {
-                        log.error("★ [Webhook] Deserialization failed", e);
-                        return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Deserialization Error"));
+                        byte[] bytes = new byte[dataBuffer.readableByteCount()];
+                        dataBuffer.read(bytes);
+                        return new String(bytes, StandardCharsets.UTF_8);
+                    } finally {
+                        DataBufferUtils.release(dataBuffer);
                     }
-                }
+                })
+                .flatMap(payload -> {
+                    String sigHeader = request.getHeaders().getFirst("Stripe-Signature");
 
-                // その他のイベントは正常応答だけ返して無視
-                return Mono.just(ResponseEntity.ok("Event received and ignored"));
-            });
+                    if (sigHeader == null) {
+                        log.error("★ [Webhook] Missing Stripe-Signature header");
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Missing Signature"));
+                    }
+
+                    Event event;
+                    try {
+                        event = Webhook.constructEvent(payload, sigHeader, Objects.requireNonNull(endpointSecret));
+                        log.info("★ [Webhook] Signature Verified. Type: {}", event.getType());
+                    } catch (Exception e) {
+                        log.error("★ [Webhook] Signature verification failed!", e);
+                        return Mono.just(ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid Signature"));
+                    }
+
+                    if ("checkout.session.completed".equals(event.getType())) {
+                        try {
+                            Session session = (Session) event.getDataObjectDeserializer().deserializeUnsafe();
+                            if (session != null) {
+                                String userIdStr = session.getMetadata() != null ? session.getMetadata().get("userId") : null;
+                                String customerId = session.getCustomer();
+
+                                if (userIdStr == null || userIdStr.isBlank()) {
+                                    log.error("★ [Webhook] userId missing in session metadata! EventID: {}, CustomerID: {}",
+                                            event.getId(), customerId);
+                                    return Mono.just(ResponseEntity.ok("User ID missing"));
+                                }
+
+                                log.info("★ [Webhook] Processing event. UserID: {}, CustomerID: {}, EventID: {}",
+                                        userIdStr, customerId, event.getId());
+
+                                return billingService.updateSubscriptionFromWebhook(
+                                                event.getId(), userIdStr, User.Plan.PREMIUM, customerId)
+                                        .map(result -> mapResultToResponse(result, event.getId(), userIdStr, customerId));
+                            }
+                        } catch (EventDataObjectDeserializationException e) {
+                            log.error("★ [Webhook] Deserialization failed", e);
+                            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Deserialization Error"));
+                        }
+                    }
+
+                    return Mono.just(mapResultToResponse(WebhookProcessResult.IGNORED, event.getId(), null, null));
+                });
+    }
+
+    private ResponseEntity<String> mapResultToResponse(
+            WebhookProcessResult result, String eventId, String userIdStr, String customerId) {
+        return switch (result) {
+            case PROCESSED -> {
+                log.info("★ [Webhook] DB Updated successfully. UserID: {}, EventID: {}", userIdStr, eventId);
+                yield ResponseEntity.ok("Success");
+            }
+            case DUPLICATE -> {
+                log.info("★ [Webhook] Event already processed. EventID: {}", eventId);
+                yield ResponseEntity.ok("Already processed");
+            }
+            case USER_NOT_FOUND -> {
+                log.error("★ [Webhook] Target user not found! UserID: {}, CustomerID: {}, EventID: {}",
+                        userIdStr, customerId, eventId);
+                yield ResponseEntity.ok("User not found");
+            }
+            case IGNORED -> ResponseEntity.ok("Event received and ignored");
+        };
     }
 }

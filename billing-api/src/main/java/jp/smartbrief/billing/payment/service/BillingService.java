@@ -1,15 +1,16 @@
 package jp.smartbrief.billing.payment.service;
 
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 import jakarta.annotation.PostConstruct;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.stripe.Stripe;
 import com.stripe.model.billingportal.Session;
@@ -18,28 +19,35 @@ import com.stripe.param.checkout.SessionCreateParams.LineItem;
 
 import jp.smartbrief.billing.identity.domain.User;
 import jp.smartbrief.billing.identity.repository.UserRepository;
+import jp.smartbrief.billing.payment.domain.WebhookProcessResult;
 import jp.smartbrief.billing.payment.dto.BillingStatusDto;
-import jp.smartbrief.billing.payment.repository.ProcessedStripeEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/**
- * 課金ドメインサービス
- * * 責務:
- * 1. 課金ステータスの参照
- * 2. Stripe API との通信（Checkout/Portal）- ※ブロッキング処理の隔離
- * 3. Webhook によるステータス更新 - ※トランザクション管理
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class BillingService {
 
+    private static final String INSERT_IGNORE_EVENT_SQL =
+            "INSERT IGNORE INTO processed_stripe_events (event_id) VALUES (:eventId)";
+
+    private static final String UPDATE_SUBSCRIPTION_COLUMNS_SQL = """
+            UPDATE users
+            SET plan_type = :planType,
+                stripe_customer_id = COALESCE(NULLIF(:stripeCustomerId, ''), stripe_customer_id),
+                subscription_expires_at = :expiresAt
+            WHERE id = :userId
+            """;
+
+    private static final String CHECK_USER_EXISTS_SQL =
+            "SELECT COUNT(*) FROM users WHERE id = :userId";
+
     private final UserRepository userRepository;
-    private final ProcessedStripeEventRepository eventRepository; // ★追加
-    private final DatabaseClient databaseClient; // ★ これを追加！
+    private final DatabaseClient databaseClient;
+    private final TransactionalOperator transactionalOperator;
 
     @Value("${stripe.api.key}")
     private String stripeApiKey;
@@ -47,62 +55,42 @@ public class BillingService {
     @Value("${app.frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
-    // デフォルト値を削除。環境変数 STRIPE_PRICE_ID がなければ起動時にクラッシュさせる。
-    @Value("${STRIPE_PRICE_ID}") 
+    @Value("${STRIPE_PRICE_ID}")
     private String premiumPriceId;
-    /**
-     * アプリ起動時にStripe APIキーを初期化
-     */
+
     @PostConstruct
     public void init() {
         Stripe.apiKey = stripeApiKey;
     }
 
-    // --- 1. 参照系ロジック ---
-
-    /**
-     * ユーザーの現在の課金ステータスを取得
-     */
     public Mono<BillingStatusDto> getBillingStatus(String username) {
         return userRepository.findByUsername(username)
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")))
                 .map(this::mapToStatusDto);
     }
 
-    // --- 2. Stripe連携ロジック (Bounded Elastic Scheduler利用) ---
-
-    /**
-     * 決済セッション作成 (Checkout)
-     * Stripe SDKはブロッキングI/Oを行うため、専用スレッドで実行してイベントループを守る
-     */
-public Mono<String> createCheckoutSession(Long userId, String email) {
-    return Mono.fromCallable(() -> {
-        com.stripe.param.checkout.SessionCreateParams params = com.stripe.param.checkout.SessionCreateParams.builder()
-            .setMode(com.stripe.param.checkout.SessionCreateParams.Mode.SUBSCRIPTION)
-            .setCustomerEmail(email)
-            .setSuccessUrl(frontendUrl + "/payment/success?session_id={CHECKOUT_SESSION_ID}")
-            .setCancelUrl(frontendUrl + "/")
-            .addLineItem(
-                LineItem.builder()
-                    .setQuantity(1L)
-                    .setPrice(premiumPriceId)
-                    .build()
-                )
-                // ★【追加】Stripeが公式に推奨する、外部システムとの紐付け用フィールド
-                .setClientReferenceId(String.valueOf(userId)) 
-                // ★【確認】Webhookで取り出すためのメタデータ
-                .putMetadata("userId", String.valueOf(userId)) 
-                .build();
+    public Mono<String> createCheckoutSession(Long userId, String email) {
+        return Mono.fromCallable(() -> {
+            com.stripe.param.checkout.SessionCreateParams params = com.stripe.param.checkout.SessionCreateParams.builder()
+                    .setMode(com.stripe.param.checkout.SessionCreateParams.Mode.SUBSCRIPTION)
+                    .setCustomerEmail(email)
+                    .setSuccessUrl(frontendUrl + "/payment/success?session_id={CHECKOUT_SESSION_ID}")
+                    .setCancelUrl(frontendUrl + "/")
+                    .addLineItem(
+                            LineItem.builder()
+                                    .setQuantity(1L)
+                                    .setPrice(premiumPriceId)
+                                    .build()
+                    )
+                    .setClientReferenceId(String.valueOf(userId))
+                    .putMetadata("userId", String.valueOf(userId))
+                    .build();
 
             return com.stripe.model.checkout.Session.create(params).getUrl();
-        })
-        .subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic());
     }
-    /**
-     * カスタマーポータルURL発行 (Portal)
-     */
+
     public Mono<String> createPortalSession(String customerId) {
-        // ガード節: IDがない場合はStripeを呼ばずにエラー
         if (customerId == null || customerId.isEmpty()) {
             return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "課金履歴が見つかりません"));
         }
@@ -114,46 +102,73 @@ public Mono<String> createCheckoutSession(Long userId, String email) {
                     .build();
 
             return Session.create(params).getUrl();
-        })
-        .subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    // --- 3. 更新系ロジック (Transactional) ---
+    public Mono<WebhookProcessResult> updateSubscriptionFromWebhook(
+            String eventId, String userIdStr, User.Plan newPlan, String stripeCustomerId) {
+        Objects.requireNonNull(eventId, "eventId must not be null");
+        Objects.requireNonNull(newPlan, "newPlan must not be null");
 
-    /**
-     * Webhookからの通知を受けてプランを更新 (★冪等性を担保)
-     */
-@Transactional
-    public Mono<User> updateSubscriptionFromWebhook(String eventId, String userIdStr, User.Plan newPlan, String stripeCustomerId) {
-        long userId;
+        final long userId;
         try {
             userId = Long.parseLong(userIdStr);
         } catch (NumberFormatException e) {
-            return Mono.empty();
+            return Mono.just(WebhookProcessResult.USER_NOT_FOUND);
         }
 
-        // ★ 1. 既に処理済みのイベントIDかチェック
-        return eventRepository.existsById(java.util.Objects.requireNonNull(eventId))
-            .flatMap(exists -> {
-                if (exists) {
-                    log.info("Duplicate Stripe event ignored: {}", eventId);
-                    return Mono.empty(); // 既に処理済みなら何もしない (200 OKを返す)
-                }
+        LocalDateTime expiresAt = (newPlan == User.Plan.PREMIUM)
+                ? LocalDateTime.now().plusMonths(1)
+                : null;
 
-                // ★ 2. DatabaseClientを使って明示的にINSERT文を発行する (R2DBCの罠を回避)
-                return databaseClient.sql("INSERT INTO processed_stripe_events (event_id) VALUES (:eventId)")
-                    .bind("eventId", eventId)
-                    .fetch().rowsUpdated()
-                    .then(userRepository.findById(userId)
-                        // ★ここが抜けていた。ユーザーを取得した後、更新して保存するフロー。
-                        .flatMap(user -> {
-                            updateUserPlan(user, newPlan, stripeCustomerId);
-                            log.info("Subscription updated: UserID={}, Plan={}", user.getId(), newPlan);
-                            return userRepository.save(user);
-                        }));
-            });
+        return transactionalOperator.execute(txStatus ->
+                databaseClient.sql(INSERT_IGNORE_EVENT_SQL)
+                        .bind("eventId", eventId)
+                        .fetch()
+                        .rowsUpdated()
+                        .flatMap(insertedRows -> {
+                            if (insertedRows == 0) {
+                                log.info("Duplicate Stripe event ignored: {}", eventId);
+                                return Mono.just(WebhookProcessResult.DUPLICATE);
+                            }
+
+                            DatabaseClient.GenericExecuteSpec updateSpec = databaseClient.sql(UPDATE_SUBSCRIPTION_COLUMNS_SQL)
+                                    .bind("planType", newPlan.name())
+                                    .bind("userId", userId);
+
+                            updateSpec = (stripeCustomerId != null)
+                                    ? updateSpec.bind("stripeCustomerId", stripeCustomerId)
+                                    : updateSpec.bindNull("stripeCustomerId", String.class);
+
+                            updateSpec = (expiresAt != null)
+                                    ? updateSpec.bind("expiresAt", expiresAt)
+                                    : updateSpec.bindNull("expiresAt", LocalDateTime.class);
+
+                            return updateSpec.fetch()
+                                    .rowsUpdated()
+                                    .flatMap(updatedRows -> {
+                                        if (updatedRows > 0) {
+                                            log.info("Subscription updated: UserID={}, Plan={}, EventID={}", userId, newPlan, eventId);
+                                            return Mono.just(WebhookProcessResult.PROCESSED);
+                                        }
+
+                                        return databaseClient.sql(CHECK_USER_EXISTS_SQL)
+                                                .bind("userId", userId)
+                                                .map((row, meta) -> row.get(0, Long.class))
+                                                .one()
+                                                .defaultIfEmpty(0L)
+                                                .map(count -> {
+                                                    if (count > 0) {
+                                                        log.info("Subscription already up-to-date: UserID={}, Plan={}, EventID={}", userId, newPlan, eventId);
+                                                        return WebhookProcessResult.PROCESSED;
+                                                    }
+                                                    txStatus.setRollbackOnly();
+                                                    return WebhookProcessResult.USER_NOT_FOUND;
+                                                });
+                                    });
+                        })
+        ).single();
     }
-    // --- Private Helper Methods ---
 
     private BillingStatusDto mapToStatusDto(User user) {
         boolean isPremium = User.Plan.PREMIUM.name().equals(user.getPlanType())
@@ -165,20 +180,5 @@ public Mono<String> createCheckoutSession(Long userId, String email) {
                 isPremium,
                 user.getSubscriptionExpiresAt() != null ? user.getSubscriptionExpiresAt().toString() : "N/A"
         );
-    }
-
-    private void updateUserPlan(User user, User.Plan newPlan, String stripeCustomerId) {
-        user.setPlanType(newPlan.name());
-        
-        if (stripeCustomerId != null && !stripeCustomerId.isEmpty()) {
-            user.setStripeCustomerId(stripeCustomerId);
-        }
-
-        if (newPlan == User.Plan.PREMIUM) {
-            // 自動更新前提でとりあえず1ヶ月後とする（実際はWebhookの都度更新される）
-            user.setSubscriptionExpiresAt(LocalDateTime.now().plusMonths(1));
-        } else {
-            user.setSubscriptionExpiresAt(null);
-        }
     }
 }

@@ -69,3 +69,5 @@ search-api/vendor/
 ollama_data/
 qdrant_data/
 mysql_data/
+!billing-api/db/migrations/*.sql
+!billing-api/src/main/resources/schema.sql
