@@ -220,8 +220,7 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [books, setBooks] = useState<Book[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [listLoading, setListLoading] = useState(false);
+  const [pendingRequest, setPendingRequest] = useState<'search' | 'append' | null>(null);
   const [error, setError] = useState<string | null>(null);
   
   const [offset, setOffset] = useState(0);
@@ -232,15 +231,18 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
   const [rankingBooks, setRankingBooks] = useState<Book[] | null>(null);
 
   const [searchMode, setSearchMode] = useState<'keyword' | 'ai'>('keyword');
+  const [resultMode, setResultMode] = useState(searchMode);
 
   const LIMIT = 50; 
   const [searchParams] = useSearchParams(); 
   
   const rankingScrollRef = useRef<HTMLDivElement | null>(null);
   const authorScrollRef = useRef<HTMLDivElement | null>(null);
+  const latestRequestId = useRef(0);
 
-  const fetchData = useCallback(async <T,>(endpoint: string): Promise<T | null> => {
+  const fetchData = useCallback(async <T,>(endpoint: string, requestId?: number): Promise<T | null> => {
     const res = await apiClient.get<T>(endpoint);
+    if (requestId !== undefined && requestId !== latestRequestId.current) return null;
     if (res.ok) return res.data;
     showToast(res.message || 'データ取得エラー', 'error');
     if (res.status === 401) logout();
@@ -251,12 +253,14 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
     fetchData<Book[]>('/books/ranking?limit=20').then(data => setRankingBooks(data || []));
   }, [fetchData]);
 
+  useEffect(() => () => { latestRequestId.current += 1; }, []);
+
   const fetchBooks = async (type: string, word: string | null, newOffset: number, isAppend = false) => {
     if (type !== 'translation' && !word) return;
-    
-    if (!isAppend) { setLoading(true); setListLoading(true); setBooks([]); } 
-    else { setListLoading(true); }
-    
+    if (type === 'ai' && isAppend) return;
+
+    const requestId = ++latestRequestId.current;
+    setPendingRequest(isAppend ? 'append' : 'search');
     setError(null);
 
     try {
@@ -265,7 +269,6 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
 
       if (type === 'ai') {
           url = `/books/search/ai?q=${encodedWord}`;
-          if (isAppend) { setLoading(false); setListLoading(false); return; }
       } else {
           const params = `limit=${LIMIT}&offset=${newOffset}&sort=length_desc`;
           if (type === 'text') url = `/books/search?q=${encodedWord}&${params}`;
@@ -273,11 +276,23 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
           else if (type === 'translation') url = `/books/search?type=translation&${params}`;
       }
 
-      const data = await fetchData<Book[]>(url);
+      const data = await fetchData<Book[]>(url, requestId);
+      if (requestId !== latestRequestId.current) return;
       if (!data) throw new Error('検索エラー');
 
-      if (isAppend) setBooks(prev => [...prev, ...data]);
-      else setBooks(data);
+      if (isAppend) {
+        setBooks(prev => {
+          const seenIds = new Set<number>();
+          return [...prev, ...data].filter(book => {
+            if (seenIds.has(book.id)) return false;
+            seenIds.add(book.id);
+            return true;
+          });
+        });
+      } else {
+        setBooks(data);
+        setResultMode(searchMode);
+      }
 
       setHasMore(data.length === LIMIT);
       setOffset(newOffset);
@@ -285,10 +300,9 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
       setLastSearchWord(word || '');
 
     } catch {
-      setError('検索中にエラーが発生しました。');
+      if (requestId === latestRequestId.current) setError('検索中にエラーが発生しました。');
     } finally {
-      setLoading(false);
-      setListLoading(false);
+      if (requestId === latestRequestId.current) setPendingRequest(null);
     }
   };
 
@@ -311,19 +325,35 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
     fetchBooks('genre', genreWord, 0, false);
   };
 
+  const stopUpdatingResults = () => {
+    latestRequestId.current += 1;
+    setPendingRequest(null);
+    setError(null);
+    setHasMore(false);
+  };
+
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     if (tab === 'translation') {
         setQuery('');
         fetchBooks('translation', null, 0, false);
     } else {
-        setBooks([]); setHasMore(false);
+        stopUpdatingResults();
     }
   };
 
+  const handleModeChange = (mode: 'keyword' | 'ai') => {
+    if (mode === searchMode) return;
+    setSearchMode(mode);
+    setQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    stopUpdatingResults();
+  };
+
   const loadMore = () => {
-    if (!hasMore || listLoading || currentSearchType === 'ai') return;
-    fetchBooks(currentSearchType!, lastSearchWord, offset + LIMIT, true);
+    if (!hasMore || pendingRequest || !currentSearchType || currentSearchType === 'ai') return;
+    fetchBooks(currentSearchType, lastSearchWord, offset + LIMIT, true);
   };
 
   useEffect(() => {
@@ -407,8 +437,8 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
       )}
       
       <div style={styles.toggleContainer}>
-          <button style={searchMode === 'keyword' ? styles.toggleActive : styles.toggle} onClick={() => { setSearchMode('keyword'); setQuery(''); setBooks([]); }}>キーワード検索</button>
-          <button style={searchMode === 'ai' ? styles.toggleActiveAi : styles.toggle} onClick={() => { setSearchMode('ai'); setQuery(''); setBooks([]); }}>✨ AI感情検索</button>
+          <button style={searchMode === 'keyword' ? styles.toggleActive : styles.toggle} onClick={() => handleModeChange('keyword')}>キーワード検索</button>
+          <button style={searchMode === 'ai' ? styles.toggleActiveAi : styles.toggle} onClick={() => handleModeChange('ai')}>✨ AI感情検索</button>
       </div>
 
       <form onSubmit={handleSearchSubmit} style={styles.form}>
@@ -433,9 +463,7 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
             </ul>
           )}
         </div>
-        <button type="submit" disabled={loading} style={styles.button}>
-          {loading ? '...' : '検索'}
-        </button>
+        <button type="submit" style={styles.button}>検索</button>
       </form>
 
       {searchMode === 'ai' && !query && (
@@ -448,30 +476,29 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
       <div style={styles.tabWrapper}>
           <button style={activeTab === 'all' ? styles.activeTabBtn : styles.tabBtn} onClick={() => handleTabChange('all')}>すべて</button>
           <button style={activeTab === 'translation' ? styles.activeTabBtn : styles.tabBtn} onClick={() => handleTabChange('translation')}>🌍 海外翻訳作品</button>
+          <span role="status" style={styles.updateStatus}>{pendingRequest === 'search' ? '更新中…' : ''}</span>
       </div>
 
       {error && <p style={styles.error}>{error}</p>}
 
-      <div style={{marginBottom: '40px'}}>
-        {loading && !listLoading ? (
-          <div style={styles.loadingContainer}>{searchMode === 'ai' ? 'AIが思考の海から本を探しています...' : '書架を探しています...'}</div>
-        ) : books.length > 0 ? (
+      <div aria-busy={pendingRequest !== null} style={{marginBottom: '40px'}}>
+        {books.length > 0 ? (
           <>
-            <div style={searchMode === 'ai' ? styles.richGrid : styles.grid}>
+            <div style={resultMode === 'ai' ? styles.richGrid : styles.grid}>
               {books.map((book, i) => (
-                searchMode === 'ai' 
+                resultMode === 'ai'
                   ? <RichBookCardItem key={`${book.id}-${i}`} book={book} onClick={() => onBookSelect(book.id)} index={i} />
                   : <BookCardItem key={`${book.id}-${i}`} book={book} index={i} onClick={() => onBookSelect(book.id)} />
               ))}
             </div>
             {hasMore && currentSearchType !== 'ai' && (
               <div style={{textAlign: 'center', marginTop: '40px'}}>
-                <button onClick={loadMore} disabled={listLoading} style={styles.loadMoreButton}>{listLoading ? '読み込み中...' : 'もっと見る'}</button>
+                <button onClick={loadMore} disabled={pendingRequest !== null} style={styles.loadMoreButton}>{pendingRequest === 'append' ? '読み込み中...' : 'もっと見る'}</button>
               </div>
             )}
           </>
         ) : ( 
-          !loading && (query || activeTab === 'translation') && !error && (
+          pendingRequest !== 'search' && currentSearchType && !error && (
             <div style={styles.emptyState}>
               <div style={{fontSize: '48px', marginBottom: '10px'}}>🤔</div>
               <p style={styles.noResult}>本が見つかりませんでした</p>
@@ -551,7 +578,8 @@ const styles: Record<string, React.CSSProperties> = {
   rankBadge: { position: 'absolute', top: 0, left: 0, width: '24px', height: '24px', backgroundColor: theme.colors.accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: 'bold', zIndex: 10 },
   scrollButton: { position: 'absolute', top: '50%', transform: 'translateY(-50%)', width: '36px', height: '36px', borderRadius: '50%', backgroundColor: 'rgba(255,255,255,0.9)', border: 'none', boxShadow: '0 2px 5px rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 20, color: theme.colors.primary },
   loadMoreButton: { ...theme.ui.buttonPrimary, padding: '10px 30px', borderRadius: '30px', backgroundColor: 'transparent', color: theme.colors.primary, border: `1px solid ${theme.colors.primary}` },
-  tabWrapper: { display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '30px' },
+  tabWrapper: { display: 'flex', justifyContent: 'center', gap: '15px', marginBottom: '30px', position: 'relative' },
+  updateStatus: { position: 'absolute', top: '100%', marginTop: '6px', fontSize: '13px', color: theme.colors.textSub },
   tabBtn: { padding: '8px 20px', borderRadius: '20px', border: `1px solid ${theme.colors.border}`, backgroundColor: 'transparent', color: theme.colors.textSub, cursor: 'pointer', fontSize: '14px' },
   activeTabBtn: { padding: '8px 20px', borderRadius: '20px', border: 'none', backgroundColor: theme.colors.primary, color: '#fff', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' },
   suggestionList: { position: 'absolute', top: '100%', left: 0, right: 0, backgroundColor: 'white', borderRadius: '4px', listStyle: 'none', padding: '5px 0', margin: '5px 0 0 0', zIndex: 1000, boxShadow: '0 4px 15px rgba(0,0,0,0.1)', border: `1px solid ${theme.colors.border}` },
@@ -559,7 +587,6 @@ const styles: Record<string, React.CSSProperties> = {
   suggestionTitle: { fontWeight: 'bold', color: theme.colors.textMain },
   suggestionAuthor: { fontSize: '12px', color: theme.colors.textSub },
   error: { color: theme.colors.error, textAlign: 'center' },
-  loadingContainer: { textAlign: 'center', padding: '60px', color: theme.colors.textSub },
   emptyState: { textAlign: 'center', padding: '60px', color: theme.colors.textSub },
   noResult: { fontSize: '18px', fontWeight: 'bold', marginBottom: '10px', color: theme.colors.primary },
 };
