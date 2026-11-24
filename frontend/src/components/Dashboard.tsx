@@ -64,9 +64,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserData | null>();
+  const isUserPending = user === undefined;
   
   const [data, setData] = useState({
-    user: null as UserData | null,
     history: [] as Book[],
     ranking: [] as Book[],
     favorites: [] as Book[]
@@ -76,7 +77,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
     const res = await apiClient.get<T>(endpoint);
     if (res.ok) return res.data;
     showToast(res.message || '通信エラーが発生しました', 'error');
-    if (res.status === 401) logout();
+    if (res.status === 401) await logout();
     return null;
   }, [logout, showToast]);
 
@@ -91,17 +92,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
 
   useEffect(() => {
     if (!isLoggedIn) return;
+    let active = true;
     const loadAllInitialData = async () => {
       setLoading(true);
+      const userRequest = fetchData<UserData>('/billing/status').then((result) => {
+        if (active) setUser(result);
+      });
       // ★修正: authors の読み込みを廃止し、ダッシュボードの表示を高速化
-      const [user, history, ranking, favorites] = await Promise.all([
-        fetchData<UserData>('/billing/status'),
+      const [history, ranking, favorites] = await Promise.all([
         fetchData<Book[]>('/books/history'),
         fetchData<Book[]>('/books/ranking'),
-        fetchData<Book[]>('/books/favorites')
+        fetchData<Book[]>('/books/favorites'),
+        userRequest,
       ]);
+      if (!active) return;
       setData({
-        user,
         history: history || [],
         ranking: ranking || [],
         favorites: favorites || []
@@ -109,6 +114,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
       setLoading(false);
     };
     loadAllInitialData();
+    return () => { active = false; };
   }, [isLoggedIn, fetchData]);
 
   const activeContent = useMemo(() => {
@@ -157,10 +163,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
         <button onClick={() => navigate('/authors')} style={styles.navItem}>✒️ 作家一覧</button>
       </nav>
       <div style={styles.userArea}>
-        <div style={styles.userCard}>
-          <p style={styles.userName}>{data.user?.username || 'Guest'}</p>
-          <p style={styles.userPlan}>{data.user?.premium ? '💎 Premium Member' : '🌱 Free Member'}</p>
-          {!data.user?.premium ? (
+        <div style={styles.userCard} aria-busy={isUserPending}>
+          <p style={styles.userName} title={user?.username}>
+            {isUserPending ? <span aria-hidden="true" style={styles.userPlaceholder} /> : user?.username || 'Guest'}
+          </p>
+          <p style={styles.userPlan}>
+            {isUserPending ? <span aria-hidden="true" style={styles.userPlaceholder} /> : user?.premium ? '💎 Premium Member' : '🌱 Free Member'}
+          </p>
+          {!user?.premium ? (
             <button onClick={onUpgrade} style={styles.upgradeBtnSmall}>💎 Premiumに登録</button>
           ) : (
             <button onClick={onManage} style={styles.manageBtnSmall}>⚙️ 契約の管理</button>
@@ -230,8 +240,9 @@ const styles: Record<string, React.CSSProperties> = {
   separator: { height: '1px', backgroundColor: 'rgba(255,255,255,0.1)', margin: '10px 0' },
   userArea: { marginTop: '20px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.1)' },
   userCard: { marginBottom: '15px', padding: '15px', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '4px' },
-  userName: { margin: '0 0 5px 0', fontSize: '14px', fontWeight: 'bold' },
-  userPlan: { margin: 0, fontSize: '12px', color: '#ffd700' },
+  userName: { margin: '0 0 5px 0', fontSize: '14px', lineHeight: '18px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  userPlan: { margin: 0, fontSize: '12px', lineHeight: '16px', color: '#ffd700' },
+  userPlaceholder: { display: 'inline-block', width: '100px', height: '8px', verticalAlign: 'middle', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' },
   upgradeBtnSmall: { marginTop: '10px', width: '100%', padding: '8px', fontSize: '12px', backgroundColor: '#5d4037', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   manageBtnSmall: { marginTop: '10px', width: '100%', padding: '8px', fontSize: '12px', backgroundColor: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   logoutBtn: { background: 'transparent', border: '1px solid #ccc', color: '#ccc', width: '100%', padding: '8px', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' },
