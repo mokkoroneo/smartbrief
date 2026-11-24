@@ -27,6 +27,8 @@ public class BookResponse {
 
     // --- 表示制御・UI状態 ---
     private String summaryText; // クライアントに実際に表示する要約
+    @JsonProperty("hasDetailedSummary")
+    private boolean hasDetailedSummary;
     private boolean highQuality; // Proバッジを表示するかどうか
     private boolean isLocked;    // 鍵アイコンを表示するかどうか
 
@@ -82,6 +84,7 @@ public class BookResponse {
 
         // 4. ビジネスルールに基づくUI制御（責務をプライベートメソッドに分割）
         dto.setSummaryText(determineSummaryText(work, isTranslation, isPremiumUser, hasHqData));
+        dto.setHasDetailedSummary(hasText(work.getSummaryHq()) || (isTranslation && hasText(work.getSummaryLong())));
         dto.setLocked(determineLockStatus(isTranslation, isPremiumUser, hasHqData));
         dto.setHighQuality(determineHqStatus(isTranslation, isPremiumUser, hasHqData));
 
