@@ -1,5 +1,5 @@
 # 1. ビルド用コンテナ
-FROM gradle:8.5-jdk21 AS builder
+FROM gradle:8.14.5-jdk21 AS builder
 WORKDIR /app
 COPY . .
 RUN gradle build -x test --no-daemon
