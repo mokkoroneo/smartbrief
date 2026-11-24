@@ -11,11 +11,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.reactive.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -32,7 +32,7 @@ import jp.smartbrief.billing.shared.security.JwtUtil;
 import reactor.core.publisher.Mono;
 
 @SpringBootTest
-@AutoConfigureWebTestClient(timeout = "15000")
+@AutoConfigureWebTestClient(timeout = "PT15S")
 @ExtendWith(OutputCaptureExtension.class)
 @TestPropertySource(properties = {
     "SPRING_R2DBC_URL=r2dbc:mysql://${TEST_MYSQL_HOST:mysql_server}:3306/smartbrief_test_db",
