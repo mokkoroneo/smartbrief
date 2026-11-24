@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { theme } from './theme';
 import { ToastProvider } from './contexts/ToastContext';
 import { apiClient } from './utils/apiClient';
@@ -41,8 +41,7 @@ const AppWrapper: React.FC = () => {
 
 const AppContent: React.FC = () => {
   const navigate = useNavigate();
-  // ★変更点: token の代わりに isLoggedIn と setLoggedIn を取得
-  const { isLoggedIn, setLoggedIn, setPremium, logout } = useAuthStore();
+  const { resolveSession, logout } = useAuthStore();
   const { showToast } = useToast(); 
 
   // --- 課金・契約管理（Stripe連携） ---
@@ -77,26 +76,23 @@ const AppContent: React.FC = () => {
 
   // ★変更点: 起動時にCookieが有効かチェックし、自動でログイン状態を復元する
   useEffect(() => {
+    let active = true;
     const checkSession = async () => {
       // apiClientが自動でCookieを送ってくれるので、そのまま /auth/me を叩く
       const res = await apiClient.get<UserMeResponse>('/auth/me');
-      
-      if (res.ok && res.data) {
-        setLoggedIn(true);
-        // ✅ 修正後
-        setPremium(res.data.isPremium);
-      } else {
-        setLoggedIn(false);
-      }
+
+      if (active) resolveSession(res.ok && res.data ? res.data.isPremium : null);
     };
     checkSession();
-  }, [setLoggedIn, setPremium]);
+    return () => { active = false; };
+  }, [resolveSession]);
 
   return (
     <div style={styles.appRoot}>
       <Routes>
-        {/* ★変更点: ルーティングの判定を !isLoggedIn と isLoggedIn に変更 */}
-        <Route path="/login" element={ !isLoggedIn ? <Login /> : <Navigate to="/" /> } />
+        <Route element={<AuthRoute allowedWhenLoggedIn={false} />}>
+          <Route path="/login" element={<Login />} />
+        </Route>
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify" element={<VerifyEmail />} />
@@ -105,19 +101,19 @@ const AppContent: React.FC = () => {
         <Route path="/legal" element={<Legal />} />
 
         {/* 認証必須ページ */}
-        <Route path="/" element={ 
-          isLoggedIn ? (
-            <Dashboard 
+        <Route element={<AuthRoute />}>
+          <Route path="/" element={
+            <Dashboard
               onBookSelect={(id: number) => navigate(`/book/${id}`)}
               onUpgrade={handleCheckout}
               onManage={handleManageSubscription}
             />
-          ) : <Navigate to="/login" /> 
-        } />
-        <Route path="/search" element={ isLoggedIn ? <BookSearchPage /> : <Navigate to="/login" /> } />
-        <Route path="/authors" element={ isLoggedIn ? <AuthorList onBack={() => navigate('/')} /> : <Navigate to="/login" /> } />
-        <Route path="/genres" element={ isLoggedIn ? <GenreList onBack={() => navigate('/')} /> : <Navigate to="/login" /> } />
-        <Route path="/book/:bookId" element={ isLoggedIn ? <BookDetailPage /> : <Navigate to="/login" /> } />
+          } />
+          <Route path="/search" element={<BookSearchPage />} />
+          <Route path="/authors" element={<AuthorList onBack={() => navigate('/')} />} />
+          <Route path="/genres" element={<GenreList onBack={() => navigate('/')} />} />
+          <Route path="/book/:bookId" element={<BookDetailPage />} />
+        </Route>
         <Route path="/payment/success" element={<PaymentSuccess />} />
         
         <Route path="*" element={<Navigate to="/" />} />
@@ -127,6 +123,18 @@ const AppContent: React.FC = () => {
 }
 
 // --- 補助コンポーネント ---
+const AuthRoute: React.FC<{ allowedWhenLoggedIn?: boolean }> = ({ allowedWhenLoggedIn = true }) => {
+  const { isLoggedIn, isSessionPending } = useAuthStore();
+
+  if (isSessionPending) {
+    return <div role="status" style={styles.sessionPending}>認証状態を確認しています…</div>;
+  }
+  if (isLoggedIn !== allowedWhenLoggedIn) {
+    return <Navigate to={allowedWhenLoggedIn ? '/login' : '/'} replace />;
+  }
+  return <Outlet />;
+};
+
 const BookSearchPage: React.FC = () => {
   const navigate = useNavigate();
   return (
@@ -149,6 +157,7 @@ const BookDetailPage: React.FC = () => {
 
 const styles: { [key: string]: React.CSSProperties } = {
   appRoot: { minHeight: '100vh', backgroundColor: theme.colors.background, fontFamily: theme.fonts.body, color: theme.colors.textMain },
+  sessionPending: { padding: '40px 20px', textAlign: 'center', color: theme.colors.textSub },
   pageContainer: { padding: '20px', maxWidth: '900px', margin: '0 auto' },
   backLink: { background: 'none', border: 'none', color: theme.colors.textSub, cursor: 'pointer', fontSize: '14px', marginBottom: '15px', padding: 0, fontFamily: theme.fonts.heading }
 };
