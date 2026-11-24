@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -126,6 +127,43 @@ class AuditLeftoversIntegrationTest {
                 .expectStatus().isOk();
 
         assertThat(output.getOut()).doesNotContain(" DEBUG ");
+    }
+
+    @Test
+    void getMyInfo_shouldReturnFalseForExpiredPremium() {
+        verifiedFreeUser.setPlanType(User.Plan.PREMIUM.name());
+        verifiedFreeUser.setSubscriptionExpiresAt(LocalDateTime.now().minusDays(1));
+        userRepository.save(verifiedFreeUser).block();
+
+        assertMyInfo(verifiedFreeUser, false);
+    }
+
+    @Test
+    void getMyInfo_shouldReturnTrueForActivePremium() {
+        verifiedFreeUser.setPlanType(User.Plan.PREMIUM.name());
+        verifiedFreeUser.setSubscriptionExpiresAt(LocalDateTime.now().plusDays(1));
+        userRepository.save(verifiedFreeUser).block();
+
+        assertMyInfo(verifiedFreeUser, true);
+    }
+
+    @Test
+    void getMyInfo_shouldReturnFalseForFree() {
+        assertMyInfo(verifiedFreeUser, false);
+    }
+
+    private void assertMyInfo(User user, boolean expectedPremium) {
+        webTestClient.get()
+                .uri("/api/v1/auth/me")
+                .cookie("authToken", jwtUtil.generateToken(user.getUsername()))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.username").isEqualTo(user.getUsername())
+                .jsonPath("$.email").isEqualTo(user.getEmail())
+                .jsonPath("$.plan").isEqualTo(user.getPlanType())
+                .jsonPath("$.isPremium").isBoolean()
+                .jsonPath("$.isPremium").isEqualTo(expectedPremium);
     }
 
     @Test
