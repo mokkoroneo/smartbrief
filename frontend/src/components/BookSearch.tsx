@@ -103,7 +103,7 @@ const BookCardItem: React.FC<BookCardItemProps> = ({ book, onClick, index, isRan
 
   const cardStyle = {
     ...styles.bookCard,
-    ...(isRanking ? { minWidth: '120px', maxWidth: '120px', flexShrink: 0, scrollSnapAlign: 'start', marginRight: '15px' } as React.CSSProperties : {}),
+    ...(isRanking ? styles.rankingCard : {}),
     ...(isHovered ? styles.bookCardHover : {}),
   };
 
@@ -229,7 +229,7 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
   const [currentSearchType, setCurrentSearchType] = useState<string | null>(null); 
   const [lastSearchWord, setLastSearchWord] = useState('');
   const [activeTab, setActiveTab] = useState('all'); 
-  const [rankingBooks, setRankingBooks] = useState<Book[]>([]);
+  const [rankingBooks, setRankingBooks] = useState<Book[] | null>(null);
 
   const [searchMode, setSearchMode] = useState<'keyword' | 'ai'>('keyword');
 
@@ -370,15 +370,21 @@ const BookSearch: React.FC<BookSearchProps> = ({ onBookSelect }) => {
         <p style={styles.subText}>AIが要約した名作文学の世界へ</p>
       </div>
 
-      {rankingBooks.length > 0 && activeTab === 'all' && !query && (
+      {activeTab === 'all' && !query && (rankingBooks === null || rankingBooks.length > 0) && (
         <div style={{marginBottom: '50px'}}>
           <h3 style={styles.sectionTitle}>👑 今週の人気ランキング</h3>
           <div style={{position: 'relative'}}>
             <button style={{...styles.scrollButton, left: '-20px'}} onClick={() => scrollContainer(rankingScrollRef, 'left')}>&#10094;</button>
-            <div ref={rankingScrollRef} style={styles.horizontalScroll}>
-              {rankingBooks.map((book, i) => (
-                <BookCardItem key={`rank-${i}`} book={book} index={i} onClick={() => onBookSelect(book.id)} isRanking={true} />
-              ))}
+            <div ref={rankingScrollRef} style={styles.horizontalScroll} aria-busy={rankingBooks === null}>
+              {rankingBooks === null ? (
+                Array.from({ length: 8 }, (_, i) => (
+                  <div key={i} aria-hidden="true" style={{ ...styles.bookCard, ...styles.rankingCard, ...styles.rankingSkeleton }} />
+                ))
+              ) : (
+                rankingBooks.map((book, i) => (
+                  <BookCardItem key={`rank-${i}`} book={book} index={i} onClick={() => onBookSelect(book.id)} isRanking={true} />
+                ))
+              )}
             </div>
             <button style={{...styles.scrollButton, right: '-20px'}} onClick={() => scrollContainer(rankingScrollRef, 'right')}>&#10095;</button>
           </div>
@@ -505,6 +511,8 @@ const styles: Record<string, React.CSSProperties> = {
   
   // 通常カード
   bookCard: { position: 'relative', backgroundColor: '#2b2222', borderRadius: '4px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)', cursor: 'pointer', transition: 'transform 0.3s ease', overflow: 'hidden', aspectRatio: '2 / 3' },
+  rankingCard: { minWidth: '120px', maxWidth: '120px', flexShrink: 0, scrollSnapAlign: 'start', marginRight: '15px' },
+  rankingSkeleton: { backgroundColor: theme.colors.border, cursor: 'default' },
   bookCardHover: { transform: 'translateY(-5px)', boxShadow: '0 15px 30px rgba(0,0,0,0.2)' },
   
   // ★ AI検索用のリッチカードスタイル
