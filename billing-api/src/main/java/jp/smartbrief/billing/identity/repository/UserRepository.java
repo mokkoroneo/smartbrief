@@ -37,4 +37,6 @@ public interface UserRepository extends ReactiveCrudRepository<User, Long> {
     
     // ★追加
     Mono<User> findByVerificationToken(String verificationToken);
+
+    Mono<User> findByStripeCustomerId(String stripeCustomerId);
 }

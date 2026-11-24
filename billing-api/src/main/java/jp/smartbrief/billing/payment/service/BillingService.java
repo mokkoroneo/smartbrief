@@ -38,12 +38,26 @@ public class BillingService {
             UPDATE users
             SET plan_type = :planType,
                 stripe_customer_id = COALESCE(NULLIF(:stripeCustomerId, ''), stripe_customer_id),
-                subscription_expires_at = :expiresAt
+                subscription_expires_at = CASE
+                    WHEN :expiresAt IS NULL THEN NULL
+                    WHEN subscription_expires_at > :expiresAt THEN subscription_expires_at
+                    ELSE :expiresAt
+                END
             WHERE id = :userId
             """;
 
     private static final String CHECK_USER_EXISTS_SQL =
             "SELECT COUNT(*) FROM users WHERE id = :userId";
+
+    private static final String EXTEND_SUBSCRIPTION_SQL = """
+            UPDATE users
+            SET plan_type = :planType,
+                subscription_expires_at = CASE
+                    WHEN subscription_expires_at > :periodEnd THEN subscription_expires_at
+                    ELSE :periodEnd
+                END
+            WHERE id = :userId AND stripe_customer_id = :customerId
+            """;
 
     private final UserRepository userRepository;
     private final DatabaseClient databaseClient;
@@ -168,6 +182,61 @@ public class BillingService {
                                     });
                         })
         ).single();
+    }
+
+    public Mono<WebhookProcessResult> extendSubscriptionFromInvoice(
+            String eventId, String customerId, LocalDateTime periodEnd) {
+        Objects.requireNonNull(eventId, "eventId must not be null");
+        Objects.requireNonNull(periodEnd, "periodEnd must not be null");
+
+        return transactionalOperator.execute(txStatus ->
+                databaseClient.sql(INSERT_IGNORE_EVENT_SQL)
+                        .bind("eventId", eventId)
+                        .fetch()
+                        .rowsUpdated()
+                        .flatMap(insertedRows -> {
+                            if (insertedRows == 0) {
+                                log.info("Duplicate Stripe event ignored: {}", eventId);
+                                return Mono.just(WebhookProcessResult.DUPLICATE);
+                            }
+
+                            Mono<User> targetUser = customerId == null || customerId.isBlank()
+                                    ? Mono.empty()
+                                    : userRepository.findByStripeCustomerId(customerId);
+                            return targetUser
+                                    .flatMap(user -> extendInvoiceExpiry(user.getId(), customerId, periodEnd))
+                                    .map(ignored -> WebhookProcessResult.PROCESSED)
+                                    .switchIfEmpty(Mono.fromSupplier(() -> {
+                                        txStatus.setRollbackOnly();
+                                        return WebhookProcessResult.USER_NOT_FOUND;
+                                    }));
+                        })
+        ).single();
+    }
+
+    private Mono<Long> extendInvoiceExpiry(long userId, String customerId, LocalDateTime periodEnd) {
+        return databaseClient.sql(EXTEND_SUBSCRIPTION_SQL)
+                .bind("planType", User.Plan.PREMIUM.name())
+                .bind("periodEnd", periodEnd)
+                .bind("userId", userId)
+                .bind("customerId", customerId)
+                .fetch()
+                .rowsUpdated()
+                .flatMap(updatedRows -> {
+                    if (updatedRows > 0) {
+                        return Mono.just(userId);
+                    }
+                    // A no-op update may report zero changed rows. Check the current customer link.
+                    return databaseClient.sql("""
+                            SELECT id FROM users
+                            WHERE id = :userId AND stripe_customer_id = :customerId
+                            FOR UPDATE
+                            """)
+                            .bind("userId", userId)
+                            .bind("customerId", customerId)
+                            .map((row, metadata) -> row.get("id", Long.class))
+                            .one();
+                });
     }
 
     private BillingStatusDto mapToStatusDto(User user) {

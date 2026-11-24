@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import javax.crypto.Mac;
@@ -122,6 +123,37 @@ class WebhookIdempotencyTest {
                 })
                 .one()
                 .block();
+    }
+
+    @Test
+    void checkoutWebhookPreservesLaterSubscriptionExpiry() {
+        LocalDateTime existingExpiry = LocalDateTime.now().plusMonths(2).withNano(0);
+        String customerId = "cus_checkout_future_expiry";
+        databaseClient.sql("""
+                UPDATE users
+                SET plan_type = 'PREMIUM',
+                    stripe_customer_id = :customerId,
+                    subscription_expires_at = :expiresAt
+                WHERE id = :userId
+                """)
+                .bind("customerId", customerId)
+                .bind("expiresAt", existingExpiry)
+                .bind("userId", targetUser.getId())
+                .fetch()
+                .rowsUpdated()
+                .block();
+
+        WebhookProcessResult result = billingService.updateSubscriptionFromWebhook(
+                "evt_checkout_future_expiry", String.valueOf(targetUser.getId()), User.Plan.PREMIUM, customerId)
+                .block();
+
+        assertThat(result).isEqualTo(WebhookProcessResult.PROCESSED);
+        LocalDateTime savedExpiry = databaseClient.sql("SELECT subscription_expires_at FROM users WHERE id = :userId")
+                .bind("userId", targetUser.getId())
+                .map((row, metadata) -> row.get("subscription_expires_at", LocalDateTime.class))
+                .one()
+                .block();
+        assertThat(savedExpiry).isEqualTo(existingExpiry);
     }
 
     @Test

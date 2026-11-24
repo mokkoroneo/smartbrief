@@ -1,7 +1,11 @@
 package jp.smartbrief.billing.payment.controller;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -18,6 +22,9 @@ import jp.smartbrief.billing.payment.service.BillingService;
 
 import com.stripe.exception.EventDataObjectDeserializationException;
 import com.stripe.model.Event;
+import com.stripe.model.Invoice;
+import com.stripe.model.InvoiceLineItem;
+import com.stripe.model.InvoiceLineItemCollection;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 
@@ -91,8 +98,44 @@ public class StripeWebhookController {
                         }
                     }
 
+                    if ("invoice.paid".equals(event.getType())) {
+                        return handleInvoicePaid(event);
+                    }
+
                     return Mono.just(mapResultToResponse(WebhookProcessResult.IGNORED, event.getId(), null, null));
                 });
+    }
+
+    private Mono<ResponseEntity<String>> handleInvoicePaid(Event event) {
+        Invoice invoice;
+        try {
+            invoice = (Invoice) event.getDataObjectDeserializer().deserializeUnsafe();
+        } catch (EventDataObjectDeserializationException e) {
+            log.error("Stripe invoice deserialization failed. EventID: {}", event.getId(), e);
+            return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Deserialization Error"));
+        }
+
+        String customerId = invoice == null ? null : invoice.getCustomer();
+        InvoiceLineItemCollection lines = invoice == null ? null : invoice.getLines();
+        OptionalLong latestEnd = lines == null || lines.getData() == null
+                ? OptionalLong.empty()
+                : lines.getData().stream()
+                        .filter(Objects::nonNull)
+                        .map(InvoiceLineItem::getPeriod)
+                        .filter(Objects::nonNull)
+                        .map(InvoiceLineItem.Period::getEnd)
+                        .filter(Objects::nonNull)
+                        .mapToLong(Long::longValue)
+                        .max();
+        if (latestEnd.isEmpty()) {
+            log.info("Stripe invoice ignored because its lines contain no period end. EventID: {}", event.getId());
+            return Mono.just(mapResultToResponse(WebhookProcessResult.IGNORED, event.getId(), null, customerId));
+        }
+
+        LocalDateTime periodEnd = LocalDateTime.ofInstant(
+                Instant.ofEpochSecond(latestEnd.getAsLong()), ZoneId.systemDefault());
+        return billingService.extendSubscriptionFromInvoice(event.getId(), customerId, periodEnd)
+                .map(result -> mapResultToResponse(result, event.getId(), null, customerId));
     }
 
     private ResponseEntity<String> mapResultToResponse(
