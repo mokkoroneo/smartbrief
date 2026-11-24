@@ -319,7 +319,7 @@ public class AuthController {
                 response.put("username", user.getUsername());
                 response.put("email", user.getEmail());
                 response.put("plan", user.getPlanType()); 
-                response.put("isPremium", "PREMIUM".equalsIgnoreCase(user.getPlanType()));
+                response.put("isPremium", user.getPremium());
                 
                 return new ResponseEntity<>(Objects.requireNonNull(response), Objects.requireNonNull(HttpStatus.OK));
             })
