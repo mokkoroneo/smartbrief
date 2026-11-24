@@ -111,11 +111,9 @@ public class BookController {
 
         return historyRepository.findHistoryByUserId(context.userId())
                 .filter(history -> history.getBookId() != null)
-                .flatMap(history -> 
-                    workRepository.findById(Objects.requireNonNull(history.getBookId()))
-                            .map(work -> BookResponse.from(work, context.isPremium()))
-                )
+                .map(history -> history.getBookId())
                 .collectList()
+                .flatMap(bookIds -> loadBooksInOrder(bookIds, context.isPremium()))
                 .map(ResponseEntity::ok);
     }
 
@@ -127,11 +125,9 @@ public class BookController {
 
         return favoriteRepository.findByUserIdOrderByCreatedAtDesc(context.userId())
                 .filter(fav -> fav.getBookId() != null)
-                .flatMap(fav -> 
-                    workRepository.findById(Objects.requireNonNull(fav.getBookId()))
-                            .map(work -> BookResponse.from(work, context.isPremium()))
-                )
+                .map(UserFavorite::getBookId)
                 .collectList()
+                .flatMap(bookIds -> loadBooksInOrder(bookIds, context.isPremium()))
                 .map(ResponseEntity::ok);
     }
 
@@ -300,6 +296,21 @@ if ("translation".equalsIgnoreCase(type)) {
     // =========================================================================
     // ヘルパーメソッド
     // =========================================================================
+
+    private Mono<List<BookResponse>> loadBooksInOrder(List<Integer> bookIds, boolean isPremium) {
+        if (bookIds.isEmpty()) {
+            return Mono.just(List.of());
+        }
+
+        List<Integer> distinctIds = bookIds.stream().distinct().toList();
+        return workRepository.findAllById(distinctIds)
+                .collectMap(Work::getId)
+                .map(worksById -> bookIds.stream()
+                        .map(worksById::get)
+                        .filter(Objects::nonNull)
+                        .map(work -> BookResponse.from(work, isPremium))
+                        .toList());
+    }
 
     private void validateAuthentication(UserContext context) {
         if (!context.isAuthenticated()) {
