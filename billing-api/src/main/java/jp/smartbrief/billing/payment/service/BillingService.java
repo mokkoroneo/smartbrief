@@ -38,7 +38,11 @@ public class BillingService {
             UPDATE users
             SET plan_type = :planType,
                 stripe_customer_id = COALESCE(NULLIF(:stripeCustomerId, ''), stripe_customer_id),
-                subscription_expires_at = :expiresAt
+                subscription_expires_at = CASE
+                    WHEN :expiresAt IS NULL THEN NULL
+                    WHEN subscription_expires_at > :expiresAt THEN subscription_expires_at
+                    ELSE :expiresAt
+                END
             WHERE id = :userId
             """;
 
