@@ -170,7 +170,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
           <p style={styles.userPlan}>
             {isUserPending ? <span aria-hidden="true" style={styles.userPlaceholder} /> : user?.premium ? '💎 Premium Member' : '🌱 Free Member'}
           </p>
-          {!user?.premium ? (
+          {isUserPending ? (
+            <div aria-hidden="true" style={styles.userActionPlaceholder} />
+          ) : !user?.premium ? (
             <button onClick={onUpgrade} style={styles.upgradeBtnSmall}>💎 Premiumに登録</button>
           ) : (
             <button onClick={onManage} style={styles.manageBtnSmall}>⚙️ 契約の管理</button>
@@ -219,6 +221,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onBookSelect, onUpgrade, onManage
 };
 
 // --- Styles (※Author関係のスタイルを削除し、コード量を削減) ---
+const userActionSize: React.CSSProperties = { display: 'block', marginTop: '10px', width: '100%', height: '33px' };
+
 const styles: Record<string, React.CSSProperties> = {
   wrapper: { display: 'flex', minHeight: '100vh', backgroundColor: theme.colors.background, fontFamily: theme.fonts.body, color: theme.colors.textMain, overflowX: 'hidden' },
   sidebar: { width: '260px', backgroundColor: theme.colors.primary, color: '#efebe9', display: 'flex', flexDirection: 'column', padding: '30px 20px', boxShadow: '4px 0 10px rgba(0,0,0,0.05)', flexShrink: 0, zIndex: 50, transition: 'transform 0.3s' },
@@ -243,8 +247,9 @@ const styles: Record<string, React.CSSProperties> = {
   userName: { margin: '0 0 5px 0', fontSize: '14px', lineHeight: '18px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   userPlan: { margin: 0, fontSize: '12px', lineHeight: '16px', color: '#ffd700' },
   userPlaceholder: { display: 'inline-block', width: '100px', height: '8px', verticalAlign: 'middle', borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' },
-  upgradeBtnSmall: { marginTop: '10px', width: '100%', padding: '8px', fontSize: '12px', backgroundColor: '#5d4037', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
-  manageBtnSmall: { marginTop: '10px', width: '100%', padding: '8px', fontSize: '12px', backgroundColor: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  userActionPlaceholder: { ...userActionSize, borderRadius: '4px', backgroundColor: 'rgba(255,255,255,0.2)' },
+  upgradeBtnSmall: { ...userActionSize, padding: '8px', fontSize: '12px', backgroundColor: '#5d4037', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
+  manageBtnSmall: { ...userActionSize, padding: '8px', fontSize: '12px', backgroundColor: '#6c757d', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' },
   logoutBtn: { background: 'transparent', border: '1px solid #ccc', color: '#ccc', width: '100%', padding: '8px', borderRadius: '4px', cursor: 'pointer', fontSize: '13px' },
   header: { marginBottom: '30px', borderBottom: `1px solid ${theme.colors.border}`, paddingBottom: '15px' },
   pageTitle: { fontSize: '24px', margin: '0 0 5px 0', color: theme.colors.primary, fontWeight: 'bold', fontFamily: theme.fonts.heading },
