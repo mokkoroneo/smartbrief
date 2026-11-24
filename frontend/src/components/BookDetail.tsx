@@ -27,8 +27,9 @@ interface BookData {
   category?: string;
   catchphrase?: string;
   insight?: string;
-  summaryText?: string;
-  summary_300?: string;
+  summaryText?: string | null;
+  summary300?: string | null;
+  hasDetailedSummary?: boolean;
   bodyText?: string;
   image_url?: string;
   aozoraUrl?: string;
@@ -210,7 +211,9 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
   const shouldShowLock = book.locked === true && !isPremium;
 
   // 表示用データの準備
-  const rawSummary = shouldShowLock ? (book.summary_300 || book.summaryText) : book.summaryText;
+  const rawSummary = shouldShowLock
+    ? (book.summary300 || book.summaryText)
+    : (book.summaryText || book.summary300);
   let summarySections = parseSummary(rawSummary || "");
 
   // ロック時の要約表示制限（冒頭5行のみ）
@@ -292,6 +295,12 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
           {viewMode === 'summary' ? (
             <>
               <div style={styles.textBlock}>
+                {!shouldShowLock && !rawSummary && (
+                  <p style={styles.summaryNote}>この作品の要約はまだ生成されていません</p>
+                )}
+                {!shouldShowLock && rawSummary && book.hasDetailedSummary !== true && (
+                  <p style={styles.summaryNote}>※ 詳しい要約はまだ生成されていません（短いあらすじを表示しています）</p>
+                )}
                 {summarySections.map((section, idx) => (
                   <div key={idx} style={{ marginBottom: '40px' }}>
                     {(!shouldShowLock && section.title) && <h3 style={styles.sectionTitle}>{section.title}</h3>}
@@ -399,6 +408,7 @@ const styles: Record<string, React.CSSProperties> = {
   textBlock: {},
   sectionTitle: { fontFamily: theme.fonts.heading, fontSize: '20px', color: theme.colors.primary, marginBottom: '20px', borderBottom: `1px dotted ${theme.colors.border}`, paddingBottom: '5px', display: 'inline-block' },
   paragraph: { fontSize: '16px', lineHeight: '1.9', color: theme.colors.textMain, marginBottom: '1.5em', textAlign: 'justify' },
+  summaryNote: { fontSize: '14px', lineHeight: '1.8', color: theme.colors.textSub, marginBottom: '1.5em' },
   readerParagraph: { fontSize: '18px', lineHeight: '2.2', fontFamily: theme.fonts.heading, color: '#222', marginBottom: '2em', textAlign: 'justify' },
   insightBox: { marginTop: '50px', padding: '30px', backgroundColor: '#f8f9fa', borderLeft: `4px solid ${theme.colors.accent}`, borderRadius: '0 4px 4px 0' },
   insightTitle: { fontSize: '16px', fontWeight: 'bold', color: theme.colors.textMain, marginBottom: '15px', display: 'flex', alignItems: 'center' },
