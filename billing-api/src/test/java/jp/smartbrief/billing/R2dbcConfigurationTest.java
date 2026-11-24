@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.TestPropertySource;
 
+import io.r2dbc.pool.ConnectionPool;
 import jp.smartbrief.billing.catalog.repository.UserBookHistoryRepository;
 import jp.smartbrief.billing.catalog.repository.UserFavoriteRepository;
 import jp.smartbrief.billing.catalog.repository.WorkRepository;
@@ -37,5 +38,10 @@ class R2dbcConfigurationTest {
         assertThat(context.getBeanNamesForType(WorkRepository.class)).hasSize(1);
         assertThat(context.getBeanNamesForType(UserBookHistoryRepository.class)).hasSize(1);
         assertThat(context.getBeanNamesForType(UserFavoriteRepository.class)).hasSize(1);
+    }
+
+    @Test
+    void usesConnectionPoolForPrimaryConnectionFactory() {
+        assertThat(context.getBean("connectionFactory")).isInstanceOf(ConnectionPool.class);
     }
 }
