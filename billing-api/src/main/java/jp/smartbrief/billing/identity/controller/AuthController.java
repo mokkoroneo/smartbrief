@@ -46,6 +46,7 @@ public class AuthController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final WebClient webClient = WebClient.create();
     
     @Value("${n8n.webhook.email:https://n8n.smartbrief.jp/webhook/send-email}")
     private String n8nEmailWebhookUrl;
@@ -103,7 +104,7 @@ public class AuthController {
     public Mono<ResponseEntity<Map<String, String>>> logout(ServerHttpResponse response) {
         // 有効期限0のCookieを上書きして削除させる
         ResponseCookie cookie = ResponseCookie.from("authToken", "")
-            .httpOnly(true).secure(true).sameSite("Strict").path("/").maxAge(0).build();
+            .httpOnly(true).secure(true).sameSite("Lax").path("/").maxAge(0).build();
         response.addCookie(cookie);
         return Mono.just(createResponse("ログアウトしました", HttpStatus.OK));
     }
@@ -150,7 +151,7 @@ public class AuthController {
                         
                         return userRepository.save(newUser)
                             .flatMap(savedUser -> {
-                                WebClient.create()
+                                webClient
                                     .post()
                                     .uri(Objects.requireNonNull(n8nVerifyEmailWebhookUrl))
                                     .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON)) // ★ラップ
@@ -161,7 +162,10 @@ public class AuthController {
                                     )))
                                     .retrieve()
                                     .toBodilessEntity()
-                                    .subscribe();
+                                    .subscribe(
+                                        unused -> {},
+                                        ex -> log.error("Failed to send registration verification webhook for userId={}", savedUser.getId(), ex)
+                                    );
 
                                 return Mono.just(createResponse("仮登録が完了しました。送信されたメール内のリンクをクリックして認証を完了してください。", HttpStatus.OK));
                             });
@@ -206,7 +210,7 @@ public class AuthController {
                 user.setResetPasswordExpiresAt(LocalDateTime.now().plusHours(1));
 
                 return userRepository.save(user)
-                    .flatMap(savedUser -> WebClient.create()
+                    .flatMap(savedUser -> webClient
                         .post()
                         .uri(Objects.requireNonNull(n8nEmailWebhookUrl))
                         .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON))
@@ -277,7 +281,7 @@ public class AuthController {
 
                 return userRepository.save(user)
                     .flatMap(savedUser -> {
-                        WebClient.create()
+                        webClient
                             .post()
                             .uri(Objects.requireNonNull(n8nVerifyEmailWebhookUrl))
                             .contentType(Objects.requireNonNull(MediaType.APPLICATION_JSON))

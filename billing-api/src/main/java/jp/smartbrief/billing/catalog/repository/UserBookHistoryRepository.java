@@ -11,6 +11,7 @@ import reactor.core.publisher.Mono;
 @Repository
 public interface UserBookHistoryRepository extends R2dbcRepository<UserBookHistory, Long> {
 
+    @Query("SELECT * FROM user_book_history WHERE user_id = :userId ORDER BY viewed_at DESC LIMIT 100")
     Flux<UserBookHistory> findHistoryByUserId(Long userId);
 
     @Query("SELECT book_id FROM user_book_history WHERE book_id IS NOT NULL GROUP BY book_id ORDER BY COUNT(book_id) DESC LIMIT 10")

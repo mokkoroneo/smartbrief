@@ -15,6 +15,8 @@ import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
 import org.springframework.data.r2dbc.repository.config.EnableR2dbcRepositories;
 import org.springframework.lang.NonNull; // ★追加
 
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.pool.ConnectionPoolConfiguration;
 import io.r2dbc.spi.ConnectionFactories;
 import io.r2dbc.spi.ConnectionFactory;
 import io.r2dbc.spi.ConnectionFactoryOptions;
@@ -58,7 +60,14 @@ public class R2dbcPrimaryConfig {
         if (properties.getPassword() != null) {
             builder.option(ConnectionFactoryOptions.PASSWORD, properties.getPassword());
         }
-        return ConnectionFactories.get(builder.build());
+        ConnectionFactory connectionFactory = ConnectionFactories.get(builder.build());
+        ConnectionPoolConfiguration poolConfig = ConnectionPoolConfiguration.builder(connectionFactory)
+                .initialSize(properties.getPool().getInitialSize())
+                .maxSize(properties.getPool().getMaxSize())
+                .maxIdleTime(properties.getPool().getMaxIdleTime())
+                .build();
+
+        return new ConnectionPool(poolConfig);
     }
 
     // ★修正箇所: ConnectionFactory を直接渡す形に変更
