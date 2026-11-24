@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import { useNavigate } from 'react-router-dom';
 import Footer from './Footer';
 import { theme } from '../theme';
@@ -64,6 +66,28 @@ const parseCatchphrase = (text: string | undefined) => {
 };
 
 // --- サブコンポーネント ---
+
+const SummaryMarkdown = ({ text, paragraphStyle }: { text: string; paragraphStyle: React.CSSProperties }) => {
+  const { marginBottom, ...textStyle } = paragraphStyle;
+
+  return (
+    <div style={textStyle}>
+      <ReactMarkdown
+        remarkPlugins={[remarkBreaks]}
+        skipHtml
+        disallowedElements={['img']}
+        components={{
+          p: ({ children }) => <p style={{ marginBottom }}>{children}</p>,
+          a: ({ href, title, children }) => (
+            <a href={href} title={title} rel="noopener noreferrer">{children}</a>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+};
 
 const LoadingView = () => (
   <div style={styles.loadingContainer}>
@@ -271,9 +295,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
                 {summarySections.map((section, idx) => (
                   <div key={idx} style={{ marginBottom: '40px' }}>
                     {(!shouldShowLock && section.title) && <h3 style={styles.sectionTitle}>{section.title}</h3>}
-                    {section.content.split('\n').map((line, i) => (
-                      line.trim() && <p key={i} style={styles.paragraph}>{line}</p>
-                    ))}
+                    <SummaryMarkdown text={section.content} paragraphStyle={styles.paragraph} />
                   </div>
                 ))}
               </div>
@@ -288,9 +310,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
                     <span style={{ marginRight: '8px' }}>💡</span>
                     {isTranslation ? '作品の背景・考察' : '編集者の考察メモ'}
                   </h4>
-                  {book.insight.split('\n').map((line, i) => (
-                    line.trim() && <p key={i} style={styles.insightText}>{line}</p>
-                  ))}
+                  <SummaryMarkdown text={book.insight} paragraphStyle={styles.insightText} />
                 </div>
               )}
             </>
