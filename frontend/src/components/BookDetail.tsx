@@ -352,10 +352,12 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
         </div>
 
         <footer style={styles.bookFooter}>
-          <div style={styles.footerItem}>
-            <span style={styles.footerLabel}>読了目安</span>
-            <span style={styles.footerValue}>{isFullTranslation ? '15分' : '5分'}</span>
-          </div>
+          {!shouldShowLock && rawSummary && (
+            <div style={styles.footerItem}>
+              <span style={styles.footerLabel}>読了目安</span>
+              <span style={styles.footerValue}>{Math.max(1, Math.ceil(rawSummary.length / 500))}分</span>
+            </div>
+          )}
           <div style={styles.footerItem}>
             <a
               href={`https://www.amazon.co.jp/s?k=${encodeURIComponent(book.title + ' ' + book.authorName)}`}
