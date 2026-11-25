@@ -213,6 +213,22 @@ services:
     networks:
       - n8n_data_ai_net
 
+  # -----------------------------------
+  # 8. Text preparation sidecar (Rust)
+  # -----------------------------------
+  text-prep:
+    build:
+      context: ./tools/text-prep
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      - n8n_data_ai_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:18080/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 # ==========================================
 # networks & volumes
 # ==========================================
