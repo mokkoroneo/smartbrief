@@ -42,4 +42,60 @@ JavaScript の文字列の .length は UTF-16 コードユニット数です。�
 
 ## 対象範囲
 
-HTTP サイドカー化、青空文庫のルビ・注記剥がし、チャンク分割、邦題生成は今回の対象外です。1,000 文字未満の除外と 6 万文字以下の分岐は、パイプライン側の処理です。
+Docker Compose への追加、n8n ワークフローの変更、青空文庫のルビ・注記剥がし、チャンク分割、邦題生成は対象外です。1,000 文字未満の除外と 6 万文字以下の分岐は、パイプライン側の処理です。
+
+## HTTP サーバー
+
+クレートのディレクトリでビルドして起動します。
+
+~~~powershell
+cargo build --offline --release
+.\target\release\text-prep-server.exe --bind 127.0.0.1 --port 18080
+~~~
+
+--bind の既定値は 127.0.0.1、--port の既定値は 18080 です。起動時に標準エラーへ listening on に続けて実アドレスを 1 行出力します。--port 0 では OS が割り当てたポートが表示されます。
+
+既定ではループバックだけで待ち受けます。ローカル専用の前提で認証を備えていません。次段で Docker 化する際は、コンテナ間通信のため --bind 0.0.0.0 を指定します。
+
+### エンドポイント
+
+本文は UTF-8 の JSON です。表の N、M、B は整数です。
+
+| メソッドとパス | リクエスト本文 | 成功時の応答（200） |
+| --- | --- | --- |
+| GET /health | なし | `{"status":"ok"}` |
+| POST /strip-gutenberg | `{"text":"<本文>"}` | `{"text":"<除去後本文>","removed_lines":N,"remaining_chars":M,"warning":null}` |
+| POST /count | `{"text":"<本文>"}` | `{"chars":N,"lines":M,"bytes":B}` |
+| POST /title | `{"source":"text","text":"<Gutenberg 生テキスト>"}` | `{"title":"<原題>"}` |
+| POST /title | `{"source":"gutendex","json":"<単一書籍 JSON の生文字列>"}` | `{"title":"<原題>"}` |
+
+除去、統計、タイトル検証には CLI と共通の規則を使います。マーカーがない場合など、除去時に警告があれば warning は警告文字列になります。
+
+Gutendex の json フィールドは、単一書籍 JSON を格納した**文字列**です。書籍オブジェクトから作る場合は、n8n 側でそのオブジェクトに JSON.stringify を適用した結果を json に入れます。
+
+~~~json
+{"source":"gutendex","json":"{\"title\":\"Les Mis\\u00e9rables\"}"}
+~~~
+
+別の PowerShell での実行例です。
+
+~~~powershell
+$base = 'http://127.0.0.1:18080'
+Invoke-RestMethod "$base/health"
+$text = Get-Content -Raw -Encoding UTF8 tests/fixtures/count.txt
+$body = @{ text = $text } | ConvertTo-Json -Compress
+Invoke-RestMethod "$base/count" -Method Post -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+~~~
+
+### HTTP とエラー
+
+HTTP/1.1 のリクエストを逐次処理し、応答後に接続を閉じます。POST には Content-Length が必要です。ヘッダー名は大小文字を区別しません。Expect: 100-continue に対応します。読み取りと書き込みのタイムアウトは各 I/O 操作で 15 秒です。
+
+エラーの応答本文は `{"error":"<内容>"}` です。
+
+| ステータス | 条件 |
+| --- | --- |
+| 400 | JSON、UTF-8、必須フィールド、タイトル検証、または HTTP 形式のエラー。Content-Length の欠落・重複、Transfer-Encoding、16 KiB を超えるリクエストヘッダーも含む |
+| 404 | 存在しないパス |
+| 405 | パスで許可されていないメソッド |
+| 413 | Content-Length が本文上限の 20 MiB（20,971,520 バイト）を超過 |
