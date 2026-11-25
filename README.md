@@ -1,6 +1,6 @@
 # 📚 SmartBrief - AI要約 & 翻訳SaaSプラットフォーム (v3.0)
 
-![Java](https://img.shields.io/badge/Java_21-Spring_Boot_3.5-green)
+![Java](https://img.shields.io/badge/Java_21-Spring_Boot_4.1-green)
 ![Go](https://img.shields.io/badge/Go_1.26-Search_Service-00ADD8)
 ![React](https://img.shields.io/badge/React_19-TS_%7C_Zustand-blue)
 ![Infrastructure](https://img.shields.io/badge/Infra-Docker_%7C_Cloudflare-orange)
@@ -80,7 +80,7 @@ SaaSの生命線である「認証」と「決済」を極限まで堅牢化し�
 graph TD
     %% 既存のアクセス層
     User((User)) -->|HTTPS| CF[Cloudflare] --> FE[React Frontend]
-    FE -->|REST API| BE[Spring Boot 3.5 / Java 21]
+    FE -->|REST API| BE[Spring Boot 4.1 / Java 21]
 
     %% マイクロサービス連携
     BE -->|Async WebClient| SearchAPI[Go Search API]

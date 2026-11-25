@@ -76,7 +76,7 @@ graph TD
 
 ## 3. バックエンド設計 (Backend Design)
 
-**Tech Stack:** Java 21, Spring Boot 3.5 (WebFlux), Spring Security, R2DBC
+**Tech Stack:** Java 21, Spring Boot 4.1 (WebFlux), Spring Security, R2DBC
 
 ### 3.1 リアクティブ・アーキテクチャ (High Performance)
 I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性を考慮し、スレッドをブロックしない **Non-blocking I/O** アーキテクチャを採用しています。これにより、最小限のリソースで大量の同時リクエストを処理可能です。
@@ -105,7 +105,7 @@ I/O待ち（DBアクセス、外部APIコール）が頻発するSaaSの特性�
   - Checkout Session によるセキュアなカード情報入力。
   - Billing Portal によるユーザー主導の契約変更・解約フロー。
 - **Idempotency (冪等性):**
-  - Stripe Webhook（`checkout.session.completed` のみ対象）処理において、イベントIDのアトミックな重複排除（`processed_stripe_events` への `INSERT IGNORE`）を実装。
+  - Stripe Webhook では、`checkout.session.completed` で Premium プランを有効化し、`invoice.paid`（継続更新）で請求書明細の最も遅い期間終了日時まで有効期限を延長する。既存の有効期限の方が遅い場合はその期限を維持する。両イベントとも、イベントIDの重複排除（`processed_stripe_events` への `INSERT IGNORE`）と契約情報の更新を同一トランザクションで行う。
   - ネットワーク遅延等によるWebhook多重送信時も、重複適用されない堅牢なロジックを確立。
 
 ---
