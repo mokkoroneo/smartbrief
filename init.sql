@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS user_favorites (
 -- Stripe Webhookの重複処理防止用テーブル
 CREATE TABLE IF NOT EXISTS processed_stripe_events (
     event_id VARCHAR(255) PRIMARY KEY,
-    processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==========================================
