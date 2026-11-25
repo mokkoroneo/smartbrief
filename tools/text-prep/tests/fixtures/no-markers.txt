@@ -1,0 +1,2 @@
+First line, no Gutenberg markers.
+日本語の行

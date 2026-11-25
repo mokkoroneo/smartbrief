@@ -1,0 +1,6 @@
+Header
+*** START OF THE PROJECT GUTENBERG EBOOK FIXTURE ***
+First body line
+Second body line
+*** END OF THIS PROJECT GUTENBERG EBOOK FIXTURE ***
+Footer
