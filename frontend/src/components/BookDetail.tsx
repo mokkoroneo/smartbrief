@@ -97,17 +97,19 @@ const LoadingView = () => (
   </div>
 );
 
-const LockScreen: React.FC<{ type: 'translation' | 'limit'; onUpgrade: () => void; isReader?: boolean }> = ({ type, onUpgrade, isReader = false }) => (
+const LockScreen: React.FC<{ type: 'translation' | 'limit' | 'premium'; onUpgrade: () => void; isReader?: boolean }> = ({ type, onUpgrade, isReader = false }) => (
   <div style={styles.lockOverlay}>
     <div style={styles.lockCard}>
       <div style={{ fontSize: '32px', marginBottom: '10px' }}>🔒</div>
       <h3 style={styles.lockTitle}>
-        {type === 'translation' ? 'プレミアム限定コンテンツ' : '続きはプレミアムで'}
+        {type === 'limit' ? '続きはプレミアムで' : 'プレミアム限定コンテンツ'}
       </h3>
       <p style={styles.lockText}>
         {type === 'translation'
           ? (isReader ? "この翻訳作品の全文を読むには\nプレミアムプランへの登録が必要です。" : "詳細な解説と要約を読むには\nプレミアムプランへの登録が必要です。")
-          : "無料会員の閲覧上限に達しました。\n続きはプレミアムプランでお楽しみください。"
+          : type === 'premium'
+            ? "この作品はプレミアム限定です。\n続きを読むにはプレミアムプランへの登録が必要です。"
+            : "無料会員の閲覧上限に達しました。\n続きはプレミアムプランでお楽しみください。"
         }
       </p>
       <button style={styles.upgradeButton} onClick={onUpgrade}>
@@ -139,6 +141,8 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
       navigate('/');
     }
   }, [navigate]);
+
+  const handleLockedUpgrade = () => navigate('/');
 
   const fetchData = useCallback(async <T,>(endpoint: string, method = 'GET'): Promise<T | null> => {
     const res = method === 'POST' ? await apiClient.post<T>(endpoint, {}) : await apiClient.get<T>(endpoint);
@@ -310,7 +314,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
               </div>
 
               {shouldShowLock && (
-                <LockScreen type={isTranslation ? 'translation' : 'limit'} onUpgrade={handleLimitReached} />
+                <LockScreen type={isTranslation ? 'translation' : 'premium'} onUpgrade={handleLockedUpgrade} />
               )}
 
               {!shouldShowLock && book.insight && (
@@ -332,7 +336,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
                   ))}
 
                   {shouldShowLock ? (
-                    <LockScreen type={isTranslation ? 'translation' : 'limit'} onUpgrade={handleLimitReached} isReader />
+                    <LockScreen type={isTranslation ? 'translation' : 'premium'} onUpgrade={handleLockedUpgrade} isReader />
                   ) : (
                     <div style={styles.endMark}>― 完 ―</div>
                   )}

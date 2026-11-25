@@ -55,6 +55,9 @@ import reactor.core.publisher.Mono;
 })
 class AuditLeftoversIntegrationTest {
 
+    private static final int STANDARD_WORK_ID = 2001;
+    private static final int HQ_WORK_ID = 2002;
+
     @Autowired
     private WebTestClient webTestClient;
 
@@ -84,12 +87,15 @@ class AuditLeftoversIntegrationTest {
 
         when(workRepository.findById(anyInt())).thenAnswer(inv -> {
             Integer id = inv.getArgument(0);
-            if (id != null && id == 2001) {
+            if (id != null && (id == STANDARD_WORK_ID || id == HQ_WORK_ID)) {
                 return Mono.just(Work.builder()
-                        .id(2001)
+                        .id(id)
                         .title("上限検証作品")
                         .authorName("テスト作家")
+                        .category("AOZORA")
                         .summary300("要約")
+                        .summaryHq(id == HQ_WORK_ID ? "HQ要約" : null)
+                        .isHq(id == HQ_WORK_ID)
                         .bodyText("本文")
                         .build());
             }
@@ -168,17 +174,12 @@ class AuditLeftoversIntegrationTest {
 
     @Test
     void globalExceptionHandler_shouldPassThrough403ReasonWhenDailyLimitExceeded() {
-        databaseClient.sql("UPDATE users SET daily_view_count = 10, last_view_date = :today WHERE id = :uid")
-                .bind("today", LocalDate.now())
-                .bind("uid", verifiedFreeUser.getId())
-                .fetch()
-                .rowsUpdated()
-                .block();
+        exhaustFreeQuota(LocalDate.now());
 
         String jwt = jwtUtil.generateToken(verifiedFreeUser.getUsername());
 
         webTestClient.get()
-                .uri("/api/v1/books/2001")
+                .uri("/api/v1/books/{id}", STANDARD_WORK_ID)
                 .cookie("authToken", jwt)
                 .exchange()
                 .expectStatus().isForbidden()
@@ -186,6 +187,88 @@ class AuditLeftoversIntegrationTest {
                 .jsonPath("$.status").isEqualTo(403)
                 .jsonPath("$.error").isEqualTo("Forbidden")
                 .jsonPath("$.message").value(msg -> assertThat((String) msg).contains("無料プランの1日の閲覧制限"));
+    }
+
+    @Test
+    void lockedHqDetail_shouldSkipQuotaAndHistoryForFreeUser() {
+        assertBookDetail(HQ_WORK_ID, true);
+
+        assertViewState(HQ_WORK_ID, 0, null, 0);
+    }
+
+    @Test
+    void lockedHqDetailRepeated_shouldStillSkipQuotaAndHistory() {
+        assertBookDetail(HQ_WORK_ID, true);
+        assertBookDetail(HQ_WORK_ID, true);
+
+        assertViewState(HQ_WORK_ID, 0, null, 0);
+    }
+
+    @Test
+    void unlockedDetail_shouldConsumeQuotaAndRecordHistoryForFreeUser() {
+        assertBookDetail(STANDARD_WORK_ID, false);
+
+        assertViewState(STANDARD_WORK_ID, 1, LocalDate.now(), 1);
+    }
+
+    @Test
+    void lockedHqDetailAfterQuotaExhaustion_shouldReturnLockedResponse() {
+        LocalDate today = LocalDate.now();
+        exhaustFreeQuota(today);
+
+        assertBookDetail(HQ_WORK_ID, true);
+
+        assertViewState(HQ_WORK_ID, 10, today, 0);
+    }
+
+    @Test
+    void premiumHqDetail_shouldReturnFullDetailAndRecordHistoryWithoutQuota() {
+        verifiedFreeUser.setPlanType(User.Plan.PREMIUM.name());
+        verifiedFreeUser.setSubscriptionExpiresAt(LocalDateTime.now().plusDays(1));
+        userRepository.save(verifiedFreeUser).block();
+
+        assertBookDetail(HQ_WORK_ID, false)
+                .jsonPath("$.summaryText").isEqualTo("HQ要約")
+                .jsonPath("$.bodyText").isEqualTo("本文");
+
+        assertViewState(HQ_WORK_ID, 0, null, 1);
+    }
+
+    private WebTestClient.BodyContentSpec assertBookDetail(int bookId, boolean locked) {
+        return webTestClient.get()
+                .uri("/api/v1/books/{id}", bookId)
+                .cookie("authToken", jwtUtil.generateToken(verifiedFreeUser.getUsername()))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.locked").isEqualTo(locked);
+    }
+
+    private void exhaustFreeQuota(LocalDate today) {
+        databaseClient.sql("UPDATE users SET daily_view_count = 10, last_view_date = :today WHERE id = :uid")
+                .bind("today", today)
+                .bind("uid", verifiedFreeUser.getId())
+                .fetch()
+                .rowsUpdated()
+                .block();
+    }
+
+    private void assertViewState(int bookId, int viewCount, LocalDate lastViewDate, long historyCount) {
+        databaseClient.sql("""
+                SELECT daily_view_count, last_view_date,
+                       (SELECT COUNT(*) FROM user_book_history WHERE user_id = :uid AND book_id = :bookId) AS history_count
+                FROM users WHERE id = :uid
+                """)
+                .bind("uid", verifiedFreeUser.getId())
+                .bind("bookId", bookId)
+                .map((row, metadata) -> {
+                    assertThat(row.get("daily_view_count", Integer.class)).isEqualTo(viewCount);
+                    assertThat(row.get("last_view_date", LocalDate.class)).isEqualTo(lastViewDate);
+                    assertThat(row.get("history_count", Long.class)).isEqualTo(historyCount);
+                    return true;
+                })
+                .one()
+                .block();
     }
 
     @Test
