@@ -55,8 +55,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({ onClick, disabled, children
 // --- 3. メインコンポーネント ---
 const Login: React.FC = () => {
   const navigate = useNavigate();
-  // ★変更点: setToken から setLoggedIn に変更
-  const { setLoggedIn } = useAuthStore();
+  const { resolveSession } = useAuthStore();
   const { success, error: showError } = useToast();
   
   const [viewMode, setViewMode] = useState<'login' | 'register'>('login');
@@ -75,10 +74,12 @@ const Login: React.FC = () => {
     const res = await apiClient.post('/auth/login', { username, password });
 
     if (res.ok) {
-      success('おかえりなさい！');
-      // ★変更点: トークンを保存せず、ログイン状態だけをTrueにする
-      setLoggedIn(true);
-      navigate('/');
+      if (await resolveSession({ afterLogin: true })) {
+        success('おかえりなさい！');
+        navigate('/');
+      } else {
+        showError('会員情報を取得できませんでした。もう一度ログインしてください。');
+      }
     } else {
       showError(res.message || 'ログインに失敗しました');
       if (res.status === 401 && (res.message?.includes('認証') || res.message?.includes('verify'))) {
