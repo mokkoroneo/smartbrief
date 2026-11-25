@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS users (
     is_verified BOOLEAN DEFAULT FALSE,
     verification_token VARCHAR(255) DEFAULT NULL,
     
+    -- 無料会員の日次閲覧カウンター
+    daily_view_count INT NOT NULL DEFAULT 0,
+    last_view_date DATE DEFAULT NULL,
+
     -- 期間・作成日
     subscription_expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
