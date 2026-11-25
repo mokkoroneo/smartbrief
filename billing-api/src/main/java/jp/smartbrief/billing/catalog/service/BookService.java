@@ -2,6 +2,7 @@ package jp.smartbrief.billing.catalog.service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
@@ -27,6 +28,7 @@ public class BookService {
 
     private static final int TRANSLATION_PREVIEW_PARAGRAPHS = 4;
     private static final int TRANSLATION_PREVIEW_LENGTH = 500;
+    private static final int HQ_PREVIEW_LINES = 10;
 
     private static final String CONSUME_DAILY_QUOTA_SQL = """
             UPDATE users
@@ -131,7 +133,12 @@ public class BookService {
         BookResponse response = BookResponse.from(work, isPremium);
         if (response != null) {
             String body = response.detailBodyText(work, isPremium);
-            response.setBodyText(response.isTranslationRestricted() ? translationPreview(body) : body);
+            if (response.isTranslationRestricted()) {
+                body = translationPreview(body);
+            } else if (response.isLocked()) {
+                body = hqPreview(body);
+            }
+            response.setBodyText(body);
         }
         return response;
     }
@@ -158,6 +165,15 @@ public class BookService {
 
     private static String normalizeNewlines(String body) {
         return body.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static String hqPreview(String body) {
+        if (body == null) {
+            return null;
+        }
+
+        String[] lines = normalizeNewlines(body).split("\n", -1);
+        return String.join("\n", Arrays.copyOf(lines, Math.min(lines.length, HQ_PREVIEW_LINES)));
     }
 
     private static String truncateWithEllipsis(String text, int end) {
