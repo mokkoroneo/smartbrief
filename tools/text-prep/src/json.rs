@@ -1,7 +1,33 @@
+use std::fmt::Write;
+
 pub fn title(input: &str) -> Result<String, &'static str> {
-    let mut parser = Parser { rest: input };
-    let title = parser.book().ok_or("invalid Gutendex JSON object")?;
+    let [title] = string_fields(input, ["title"]).ok_or("invalid Gutendex JSON object")?;
     title.ok_or("Gutendex object is missing a string title")
+}
+
+/// Read the requested top-level string fields while validating the entire JSON object.
+pub fn string_fields<const N: usize>(input: &str, keys: [&str; N]) -> Option<[Option<String>; N]> {
+    Parser { rest: input }.object(keys)
+}
+
+pub fn encode_string(input: &str) -> String {
+    let mut value = String::with_capacity(input.len() + 2);
+    value.push('"');
+    for ch in input.chars() {
+        match ch {
+            '"' => value.push_str("\\\""),
+            '\\' => value.push_str("\\\\"),
+            '\u{8}' => value.push_str("\\b"),
+            '\u{c}' => value.push_str("\\f"),
+            '\n' => value.push_str("\\n"),
+            '\r' => value.push_str("\\r"),
+            '\t' => value.push_str("\\t"),
+            '\0'..='\u{1f}' => write!(value, "\\u{:04x}", ch as u32).unwrap(),
+            _ => value.push(ch),
+        }
+    }
+    value.push('"');
+    value
 }
 
 struct Parser<'a> {
@@ -14,18 +40,19 @@ enum Container {
 }
 
 impl Parser<'_> {
-    fn book(&mut self) -> Option<Option<String>> {
+    fn object<const N: usize>(&mut self, keys: [&str; N]) -> Option<[Option<String>; N]> {
         self.token('{')?;
-        let mut title = None;
+        let mut fields = [const { None }; N];
         if self.token('}').is_none() {
             loop {
                 let key = self.member_key()?;
-                if key == "title" && self.rest.starts_with('"') {
-                    title = Some(self.string()?);
+                let field = keys.iter().position(|expected| *expected == key);
+                if let Some(index) = field.filter(|_| self.rest.starts_with('"')) {
+                    fields[index] = Some(self.string()?);
                 } else {
                     self.skip_value()?;
-                    if key == "title" {
-                        title = None;
+                    if let Some(index) = field {
+                        fields[index] = None;
                     }
                 }
                 if self.token('}').is_some() {
@@ -35,7 +62,7 @@ impl Parser<'_> {
             }
         }
         self.whitespace();
-        self.rest.is_empty().then_some(title)
+        self.rest.is_empty().then_some(fields)
     }
 
     fn whitespace(&mut self) {
