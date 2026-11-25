@@ -86,7 +86,7 @@ class BookServiceConcurrencyTest {
                         .authorName("テスト著者")
                         .summary300("300字要約")
                         .summaryHq("HQ要約")
-                        .isHq(true)
+                        .isHq(false)
                         .bodyText("テスト本文_" + idx)
                         .build());
             }

@@ -20,14 +20,6 @@ import Legal from './components/Legal';
 import Login from './Login'; 
 import VerifyEmail from './VerifyEmail';
 
-// --- 型定義 ---
-interface UserMeResponse {
-  username: string;
-  email: string;
-  plan: 'FREE' | 'PREMIUM';
-  isPremium: boolean;
-}
-
 const AppWrapper: React.FC = () => {
   return (
     <ToastProvider>
@@ -77,13 +69,7 @@ const AppContent: React.FC = () => {
   // ★変更点: 起動時にCookieが有効かチェックし、自動でログイン状態を復元する
   useEffect(() => {
     let active = true;
-    const checkSession = async () => {
-      // apiClientが自動でCookieを送ってくれるので、そのまま /auth/me を叩く
-      const res = await apiClient.get<UserMeResponse>('/auth/me');
-
-      if (active) resolveSession(res.ok && res.data ? res.data.isPremium : null);
-    };
-    checkSession();
+    void resolveSession({ isActive: () => active });
     return () => { active = false; };
   }, [resolveSession]);
 

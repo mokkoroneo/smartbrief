@@ -10,14 +10,23 @@ interface ApiResponse<T = any> {
   message?: string;
 }
 
+interface RequestOptions {
+  logoutOnUnauthorized?: boolean;
+}
+
 export const apiClient = {
-  get: <T>(endpoint: string) => request<T>(endpoint, 'GET'),
+  get: <T>(endpoint: string, options?: RequestOptions) => request<T>(endpoint, 'GET', null, options),
   post: <T>(endpoint: string, body?: any) => request<T>(endpoint, 'POST', body),
   put: <T>(endpoint: string, body?: any) => request<T>(endpoint, 'PUT', body),
   delete: <T>(endpoint: string) => request<T>(endpoint, 'DELETE'),
 };
 
-async function request<T>(endpoint: string, method: string, body: any = null): Promise<ApiResponse<T>> {
+async function request<T>(
+  endpoint: string,
+  method: string,
+  body: any = null,
+  { logoutOnUnauthorized = true }: RequestOptions = {},
+): Promise<ApiResponse<T>> {
   try {
     const res = await fetch(`${BASE_URL}${endpoint}`, {
       method,
@@ -31,7 +40,7 @@ async function request<T>(endpoint: string, method: string, body: any = null): P
     });
 
     // ★ 401 (認証エラー) が返ってきたら、Zustand の logout() を呼んで全体をリセット
-    if (res.status === 401) {
+    if (res.status === 401 && logoutOnUnauthorized) {
       useAuthStore.getState().logout();
     }
 

@@ -54,9 +54,10 @@ public class BookService {
 
     private Mono<BookResponse> processViewAndCreateResponse(
             Work work, Long userId, boolean isPremium, int dailyLimit) {
+        BookResponse response = createResponse(work, isPremium);
         Integer bookId = work.getId();
-        if (bookId == null) {
-            return Mono.just(createResponse(work, isPremium));
+        if (response.isLocked() || bookId == null) {
+            return Mono.just(response);
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -64,17 +65,17 @@ public class BookService {
         return hasRecentHistoryWithin60Seconds(userId, bookId, now)
                 .flatMap(hasRecent -> {
                     if (hasRecent) {
-                        return Mono.just(createResponse(work, isPremium));
+                        return Mono.just(response);
                     }
 
                     if (isPremium) {
                         return insertHistory(work, userId, now)
-                                .thenReturn(createResponse(work, true));
+                                .thenReturn(response);
                     }
 
                     LocalDate today = now.toLocalDate();
                     return consumeDailyQuotaAndInsertHistory(work, userId, today, now, dailyLimit)
-                            .thenReturn(createResponse(work, false));
+                            .thenReturn(response);
                 });
     }
 
