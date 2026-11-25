@@ -10,6 +10,7 @@ interface ResolveSessionOptions {
 interface AuthState {
   isLoggedIn: boolean; // ★tokenではなく、ログイン状態(true/false)だけを管理
   isPremium: boolean;
+  username: string | null;
   isSessionPending: boolean;
   resolveSession: (options?: ResolveSessionOptions) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -21,22 +22,28 @@ export const useAuthStore = create<AuthState>()((set) => ({
   // 初期状態はLocalStorageに頼らず、アプリ起動時に /auth/me を叩いて判定する
   isLoggedIn: false,
   isPremium: false,
+  username: null,
   isSessionPending: true,
 
   // --- アクション (Actions) ---
   resolveSession: async ({ afterLogin = false, isActive } = {}) => {
-    const res = await apiClient.get<{ isPremium: boolean }>(
+    const res = await apiClient.get<{ isPremium: boolean; username: string }>(
       '/auth/me',
       afterLogin ? { logoutOnUnauthorized: false } : undefined,
     );
     const isPremium = res.ok && res.data ? res.data.isPremium : null;
-    if (isActive?.() === false || (afterLogin && typeof isPremium !== 'boolean')) return false;
+    if (isActive?.() === false) return false;
+    if (afterLogin && typeof isPremium !== 'boolean') {
+      set({ username: null });
+      return false;
+    }
 
     set((state) => {
       if (!afterLogin && !state.isSessionPending) return state;
       return {
         isLoggedIn: isPremium !== null,
         isPremium: isPremium ?? false,
+        username: res.ok && typeof res.data?.username === 'string' ? res.data.username : null,
         isSessionPending: false,
       };
     });
@@ -46,6 +53,6 @@ export const useAuthStore = create<AuthState>()((set) => ({
   logout: async () => {
     // ★バックエンドのCookie削除APIを呼び出して、サーバー側でログアウト処理をさせる
     await apiClient.post('/auth/logout'); 
-    set({ isLoggedIn: false, isPremium: false, isSessionPending: false });
+    set({ isLoggedIn: false, isPremium: false, username: null, isSessionPending: false });
   },
 }));

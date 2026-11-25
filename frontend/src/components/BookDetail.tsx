@@ -34,6 +34,7 @@ interface BookData {
   image_url?: string;
   aozoraUrl?: string;
   locked?: boolean;
+  translationRestricted?: boolean;
 }
 
 interface FavoriteResponse {
@@ -45,18 +46,15 @@ interface FavoriteResponse {
 /** テキストを【隅付き括弧】で見出しと本文に分割する */
 const parseSummary = (text: string | undefined): SummarySection[] => {
   if (!text) return [];
-  if (text.includes('【') && text.includes('】')) {
-    const parts = text.split(/(【[^】]+】)/).filter(Boolean);
-    const sections: SummarySection[] = [];
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].match(/【[^】]+】/) && parts[i + 1]) {
-        sections.push({ title: parts[i].replace(/[【】]/g, ''), content: parts[i + 1].trim() });
-        i++;
-      }
-    }
-    if (sections.length > 0) return sections;
+  const [opening, ...parts] = text.split(/【([^】]+)】/);
+  if (parts.length === 0) return [{ title: null, content: text }];
+
+  const sections: SummarySection[] = [];
+  if (opening.trim()) sections.push({ title: null, content: opening });
+  for (let i = 0; i < parts.length; i += 2) {
+    sections.push({ title: parts[i], content: parts[i + 1].trim() });
   }
-  return [{ title: null, content: text }];
+  return sections;
 };
 
 /** キャッチコピーからタグを抽出する */
@@ -124,11 +122,12 @@ const LockScreen: React.FC<{ type: 'translation' | 'limit' | 'premium'; onUpgrad
 const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
   const navigate = useNavigate();
   const { showToast } = useToast();
-  const { isPremium, logout } = useAuthStore();
+  const { isPremium, username, logout } = useAuthStore();
+  const request = useMemo(() => ({ bookId, isPremium, username }), [bookId, isPremium, username]);
 
   // State
   const [book, setBook] = useState<BookData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [settledRequest, setSettledRequest] = useState<typeof request | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favLoading, setFavLoading] = useState(false);
@@ -162,10 +161,14 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
   // Data Fetching
   useEffect(() => {
     let isMounted = true;
+    const { bookId } = request;
     if (!bookId) return;
 
     const loadData = async () => {
-      setLoading(true);
+      setSettledRequest(null);
+      setBook(null);
+      setError(null);
+      setShow3DReader(false);
       try {
         const [bookData, favData] = await Promise.all([
           fetchData<BookData>(`/books/${bookId}`),
@@ -180,13 +183,13 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
       } catch (err: any) {
         if (isMounted) setError(err.message);
       } finally {
-        if (isMounted) setLoading(false);
+        if (isMounted) setSettledRequest(request);
       }
     };
 
     loadData();
     return () => { isMounted = false; };
-  }, [bookId, fetchData]);
+  }, [request, fetchData]);
 
   const toggleFavorite = async () => {
     if (favLoading || !bookId) return;
@@ -199,7 +202,9 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
   // --- UI Logic & Derived State ---
 
   // ローディング・エラー判定
-  if (loading) return <LoadingView />;
+  if (!bookId) return null;
+  // effect の実行前も、別の認証状態で取得した本文は描画しない。
+  if (settledRequest !== request) return <LoadingView />;
   if (error) return <div style={styles.errorContainer}><p>{error}</p><button onClick={onBack} style={styles.backLink}>戻る</button></div>;
   if (!book) return null;
 
@@ -213,6 +218,8 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
   // 「プレミアム会員(isPremium)ならば、絶対にロックしない」というルールを
   // フロントエンド側でも強制適用します（二重の安全策）。
   const shouldShowLock = book.locked === true && !isPremium;
+  const isTranslationRestricted = book.translationRestricted === true;
+  const isImmersiveReaderLocked = shouldShowLock || isTranslationRestricted;
 
   // 表示用データの準備
   const rawSummary = shouldShowLock
@@ -261,10 +268,10 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
               <button
                 onClick={() => setShow3DReader(true)}
                 style={styles.immersiveButton}
-                disabled={shouldShowLock}
+                disabled={isImmersiveReaderLocked}
               >
                 <span style={{ marginRight: '5px' }}>📖</span>
-                {shouldShowLock ? 'プレミアム限定' : '没入モードで読む'}
+                {isImmersiveReaderLocked ? 'プレミアム限定' : '没入モードで読む'}
               </button>
             )}
           </div>
@@ -316,8 +323,11 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
               {shouldShowLock && (
                 <LockScreen type={isTranslation ? 'translation' : 'premium'} onUpgrade={handleLockedUpgrade} />
               )}
+              {isTranslationRestricted && (
+                <LockScreen type="translation" onUpgrade={handleLockedUpgrade} />
+              )}
 
-              {!shouldShowLock && book.insight && (
+              {!shouldShowLock && !isTranslationRestricted && book.insight && (
                 <div style={styles.insightBox}>
                   <h4 style={styles.insightTitle}>
                     <span style={{ marginRight: '8px' }}>💡</span>
@@ -337,7 +347,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
 
                   {shouldShowLock ? (
                     <LockScreen type={isTranslation ? 'translation' : 'premium'} onUpgrade={handleLockedUpgrade} isReader />
-                  ) : (
+                  ) : !isTranslationRestricted && (
                     <div style={styles.endMark}>― 完 ―</div>
                   )}
                 </div>
@@ -350,6 +360,9 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
                     </a>
                   )}
                 </div>
+              )}
+              {isTranslationRestricted && (
+                <LockScreen type="translation" onUpgrade={handleLockedUpgrade} isReader />
               )}
             </>
           )}
@@ -378,7 +391,7 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
         <Footer color={theme.colors.textSub} separatorColor={theme.colors.border} />
       </div>
 
-      {show3DReader && book.bodyText && (
+      {show3DReader && book.bodyText && !isImmersiveReaderLocked && (
         <BookReader3D
           title={book.title}
           bodyText={book.bodyText}
