@@ -67,7 +67,7 @@ private final WorkRepository workRepository;
                 .collect(Collectors.collectingAndThen(Collectors.toList(), List::copyOf));
 
         // ★ 修正箇所: Objects.requireNonNull を使用して Null type safety 警告を解消
-        return workRepository.findAllById(Objects.requireNonNull(intIds))
+        return workRepository.findAllByIdIn(Objects.requireNonNull(intIds))
                 .collectList()
                 .flatMapMany(dbWorks -> {
                     Map<Integer, Work> dbWorkMap = dbWorks.stream()

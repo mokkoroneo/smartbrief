@@ -74,7 +74,7 @@ public class BookController {
                 .flatMapMany(ids -> {
                     if (ids.isEmpty()) return Flux.empty();
                     
-                    return workRepository.findAllById(ids)
+                    return workRepository.findAllByIdIn(ids)
                             .collectList()
                             .flatMapMany(works -> {
                                 works.sort(Comparator.comparingInt(w -> ids.indexOf(w.getId())));
@@ -303,7 +303,7 @@ if ("translation".equalsIgnoreCase(type)) {
         }
 
         List<Integer> distinctIds = bookIds.stream().distinct().toList();
-        return workRepository.findAllById(distinctIds)
+        return workRepository.findAllByIdIn(distinctIds)
                 .collectMap(Work::getId)
                 .map(worksById -> bookIds.stream()
                         .map(worksById::get)

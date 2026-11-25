@@ -1,5 +1,7 @@
 package jp.smartbrief.billing.catalog.repository;
 
+import java.util.List;
+
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.repository.reactive.ReactiveCrudRepository;
 
@@ -15,17 +17,29 @@ import reactor.core.publisher.Flux;
  */
 public interface WorkRepository extends ReactiveCrudRepository<Work, Integer> {
 
+    String LIST_COLUMNS = "work_id, title, author_name, image_url, aozora_url, summary_300, "
+            + "summary_hq, is_hq, catchphrase, insight, genre_tag, category, original_title, "
+            + "summary_short, summary_long";
+
+    default Flux<Work> findAllByIdIn(List<Integer> ids) {
+        return ids.isEmpty() ? Flux.empty() : findListWorksByIds(ids);
+    }
+
+    @Query("SELECT " + LIST_COLUMNS + " FROM aozora_db.works WHERE work_id IN (:ids)")
+    Flux<Work> findListWorksByIds(List<Integer> ids);
+
+
     // -------------------------------------------------------------------------
     // 1. キーワード検索
     // -------------------------------------------------------------------------
 
     // ★修正: 引数に offset を追加し、SQLに ORDER BY ... LIMIT ... OFFSET を追加
     // (ページネーション時は並び順を固定しないとページ間でデータがズレるため work_id ASC を入れています)
-    @Query("SELECT * FROM aozora_db.works WHERE title LIKE :keyword OR author_name LIKE :keyword ORDER BY work_id ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM aozora_db.works WHERE title LIKE :keyword OR author_name LIKE :keyword ORDER BY work_id ASC LIMIT :limit OFFSET :offset")
     Flux<Work> searchByKeyword(String keyword, int limit, int offset);
 
     // ★追加: 文字数（長編）順での検索
-    @Query("SELECT * FROM aozora_db.works WHERE (title LIKE :keyword OR author_name LIKE :keyword) AND full_text IS NOT NULL ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM aozora_db.works WHERE (title LIKE :keyword OR author_name LIKE :keyword) AND full_text IS NOT NULL ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
     Flux<Work> searchByKeywordOrderByLength(String keyword, int limit, int offset);
 
 
@@ -34,20 +48,20 @@ public interface WorkRepository extends ReactiveCrudRepository<Work, Integer> {
     // -------------------------------------------------------------------------
 
     // ★修正: 引数に offset を追加
-    @Query("SELECT * FROM works WHERE genre_tag LIKE :genre ORDER BY work_id ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM works WHERE genre_tag LIKE :genre ORDER BY work_id ASC LIMIT :limit OFFSET :offset")
     Flux<Work> findByGenreTagContaining(String genre, int limit, int offset);
 
     // ★追加: 文字数（長編）順でのジャンル検索
-    @Query("SELECT * FROM works WHERE genre_tag LIKE :genre AND full_text IS NOT NULL ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM works WHERE genre_tag LIKE :genre AND full_text IS NOT NULL ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
     Flux<Work> findByGenreTagContainingOrderByLength(String genre, int limit, int offset);
 
 
     // -------------------------------------------------------------------------
-    // 3. その他 (変更なし)
+    // 3. その他
     // -------------------------------------------------------------------------
 
-    // サジェスト (変更なし)
-    @Query("SELECT * FROM aozora_db.works WHERE title LIKE :keyword OR author_name LIKE :keyword LIMIT 10")
+    // サジェスト
+    @Query("SELECT " + LIST_COLUMNS + " FROM aozora_db.works WHERE title LIKE :keyword OR author_name LIKE :keyword LIMIT 10")
     Flux<Work> suggestByKeyword(String keyword);
 
     // 作家一覧 (変更なし)
@@ -63,16 +77,16 @@ public interface WorkRepository extends ReactiveCrudRepository<Work, Integer> {
     Flux<String> findAllGenreTags();
     // ★★★ Task 2: カテゴリによるフィルタリング（翻訳作品検索用） ★★★
     // LIMITとOFFSETに対応
-    @Query("SELECT * FROM works WHERE category = :category ORDER BY work_id DESC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM works WHERE category = :category ORDER BY work_id DESC LIMIT :limit OFFSET :offset")
     Flux<Work> findByCategory(String category, int limit, int offset);
 
     // 文字数順で翻訳を探す場合
-    @Query("SELECT * FROM works WHERE category = :category ORDER BY LENGTH(body_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM works WHERE category = :category ORDER BY LENGTH(body_text) DESC, work_id ASC LIMIT :limit OFFSET :offset")
     Flux<Work> findByCategoryOrderByLength(String category, int limit, int offset);
 
     /* * もし category カラムがまだ空で、著者名（英字）で判定したい場合の予備クエリ (MySQL用)
      * "NOT REGEXP '[ぁ-んァ-ン一-龥]'" -> 日本語を含まない＝英字作家
      */
-    @Query("SELECT * FROM works WHERE author_name NOT REGEXP '[ぁ-んァ-ン一-龥]' LIMIT :limit OFFSET :offset")
+    @Query("SELECT " + LIST_COLUMNS + " FROM works WHERE author_name NOT REGEXP '[ぁ-んァ-ン一-龥]' LIMIT :limit OFFSET :offset")
     Flux<Work> findByEnglishAuthor(int limit, int offset);
 }
