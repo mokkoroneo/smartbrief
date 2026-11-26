@@ -13,6 +13,8 @@ import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.stripe.Stripe;
+import com.stripe.exception.InvalidRequestException;
+import com.stripe.exception.StripeException;
 import com.stripe.model.billingportal.Session;
 import com.stripe.param.billingportal.SessionCreateParams;
 import com.stripe.param.checkout.SessionCreateParams.LineItem;
@@ -84,24 +86,54 @@ public class BillingService {
     }
 
     public Mono<String> createCheckoutSession(Long userId, String email) {
-        return Mono.fromCallable(() -> {
-            com.stripe.param.checkout.SessionCreateParams params = com.stripe.param.checkout.SessionCreateParams.builder()
-                    .setMode(com.stripe.param.checkout.SessionCreateParams.Mode.SUBSCRIPTION)
-                    .setCustomerEmail(email)
-                    .setSuccessUrl(frontendUrl + "/payment/success?session_id={CHECKOUT_SESSION_ID}")
-                    .setCancelUrl(frontendUrl + "/")
-                    .addLineItem(
-                            LineItem.builder()
-                                    .setQuantity(1L)
-                                    .setPrice(premiumPriceId)
-                                    .build()
-                    )
-                    .setClientReferenceId(String.valueOf(userId))
-                    .putMetadata("userId", String.valueOf(userId))
-                    .build();
+        if (userId == null) {
+            return Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST, "User ID is required"));
+        }
 
-            return com.stripe.model.checkout.Session.create(params).getUrl();
-        }).subscribeOn(Schedulers.boundedElastic());
+        return userRepository.findById(userId)
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found")))
+                .flatMap(user -> Mono.fromCallable(() -> {
+                    var params = buildCheckoutParams(userId, email, user.getStripeCustomerId());
+                    try {
+                        return createStripeSession(params).getUrl();
+                    } catch (InvalidRequestException e) {
+                        if (params.getCustomer() == null || !"resource_missing".equals(e.getCode())
+                                || !"customer".equals(e.getParam())) {
+                            throw e;
+                        }
+                        log.warn("Retrying Stripe Checkout after stale customer id for userId={}", userId);
+                        return createStripeSession(buildCheckoutParams(userId, email, null)).getUrl();
+                    }
+                }).subscribeOn(Schedulers.boundedElastic()));
+    }
+
+    com.stripe.param.checkout.SessionCreateParams buildCheckoutParams(Long userId, String email,
+            String stripeCustomerId) {
+        var builder = com.stripe.param.checkout.SessionCreateParams.builder()
+                .setMode(com.stripe.param.checkout.SessionCreateParams.Mode.SUBSCRIPTION)
+                .setSuccessUrl(frontendUrl + "/payment/success?session_id={CHECKOUT_SESSION_ID}")
+                .setCancelUrl(frontendUrl + "/")
+                .addLineItem(
+                        LineItem.builder()
+                                .setQuantity(1L)
+                                .setPrice(premiumPriceId)
+                                .build()
+                )
+                .setClientReferenceId(String.valueOf(userId))
+                .putMetadata("userId", String.valueOf(userId));
+
+        // Stripe accepts either customer or customer_email. Reuse the saved customer to prevent duplicates.
+        if (stripeCustomerId != null && !stripeCustomerId.isBlank()) {
+            builder.setCustomer(stripeCustomerId.strip());
+        } else {
+            builder.setCustomerEmail(email);
+        }
+        return builder.build();
+    }
+
+    protected com.stripe.model.checkout.Session createStripeSession(
+            com.stripe.param.checkout.SessionCreateParams params) throws StripeException {
+        return com.stripe.model.checkout.Session.create(params);
     }
 
     public Mono<String> createPortalSession(String customerId) {
