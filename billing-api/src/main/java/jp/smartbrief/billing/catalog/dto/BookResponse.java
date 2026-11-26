@@ -38,6 +38,8 @@ public class BookResponse {
     private String category;      
     private String originalTitle; 
     private String bodyText;      
+    @JsonProperty("translationRestricted")
+    private boolean translationRestricted;
 
     // --- ★追加: AI感情検索用データ ---
     private String aiReason;  // AIが生成した「おすすめ理由」
@@ -65,7 +67,6 @@ public class BookResponse {
         dto.setAozoraUrl(work.getAozoraUrl());
         dto.setGenreTag(cleanText(work.getGenreTag()));
         dto.setCatchphrase(cleanText(work.getCatchphrase()));
-        dto.setInsight(cleanText(work.getInsight()));
         dto.setCategory(work.getCategory() != null ? work.getCategory() : "AOZORA");
         dto.setOriginalTitle(cleanText(work.getOriginalTitle()));
         
@@ -81,6 +82,13 @@ public class BookResponse {
         boolean isTranslation = "Gutenberg".equalsIgnoreCase(dto.getCategory()) || "TRANSLATION".equalsIgnoreCase(dto.getCategory());
         boolean hasHqData = Boolean.TRUE.equals(work.getIsHq());
         dto.setOverseas(isTranslation);
+        boolean freeTranslation = isFreeTranslation(isTranslation, isPremiumUser);
+        String insight = cleanText(work.getInsight());
+        dto.setTranslationRestricted(freeTranslation
+                && (effectiveText(work.getSummaryLong()) != null
+                    || effectiveText(work.getBodyText()) != null
+                    || effectiveText(insight) != null));
+        dto.setInsight(dto.isTranslationRestricted() ? null : insight);
 
         // 4. ビジネスルールに基づくUI制御（責務をプライベートメソッドに分割）
         dto.setSummaryText(determineSummaryText(work, isTranslation, isPremiumUser, hasHqData));
@@ -102,6 +110,10 @@ public class BookResponse {
      * 表示すべき要約テキストを決定する
      */
     private static String determineSummaryText(Work work, boolean isTranslation, boolean isPremium, boolean hasHq) {
+        if (isFreeTranslation(isTranslation, isPremium)) {
+            String shortSummary = effectiveText(work.getSummaryShort());
+            return shortSummary != null ? shortSummary : effectiveText(work.getSummary300());
+        }
         if (isTranslation) {
             if (hasText(work.getSummaryLong())) return cleanText(work.getSummaryLong());
             if (hasText(work.getSummaryShort())) return cleanText(work.getSummaryShort());
@@ -113,6 +125,16 @@ public class BookResponse {
             return cleanText(work.getSummaryHq());
         }
         return cleanText(work.getSummary300());
+    }
+
+    public String detailBodyText(Work work, boolean isPremiumUser) {
+        String body = work.getBodyText();
+        // 無料翻訳では、部分ロックが不要な空本文も未収録として扱う。
+        return isFreeTranslation(isOverseas, isPremiumUser) ? effectiveText(body) : body;
+    }
+
+    private static boolean isFreeTranslation(boolean isTranslation, boolean isPremium) {
+        return isTranslation && !isPremium;
     }
 
 /**
@@ -170,6 +192,11 @@ public class BookResponse {
 
     private static boolean hasText(String text) {
         return text != null && !text.isEmpty();
+    }
+
+    private static String effectiveText(String text) {
+        String cleaned = cleanText(text);
+        return cleaned != null && !cleaned.strip().isEmpty() ? cleaned : null;
     }
 
     private static String getOrDefault(String text, String defaultValue) {

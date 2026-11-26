@@ -2,6 +2,8 @@ package jp.smartbrief.billing.catalog.service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 import org.springframework.http.HttpStatus;
@@ -23,6 +25,10 @@ import reactor.core.publisher.Mono;
 @Service
 @RequiredArgsConstructor
 public class BookService {
+
+    private static final int TRANSLATION_PREVIEW_PARAGRAPHS = 4;
+    private static final int TRANSLATION_PREVIEW_LENGTH = 500;
+    private static final int HQ_PREVIEW_LINES = 10;
 
     private static final String CONSUME_DAILY_QUOTA_SQL = """
             UPDATE users
@@ -126,8 +132,54 @@ public class BookService {
     private BookResponse createResponse(Work work, boolean isPremium) {
         BookResponse response = BookResponse.from(work, isPremium);
         if (response != null) {
-            response.setBodyText(work.getBodyText());
+            String body = response.detailBodyText(work, isPremium);
+            if (response.isTranslationRestricted()) {
+                body = translationPreview(body);
+            } else if (response.isLocked()) {
+                body = hqPreview(body);
+            }
+            response.setBodyText(body);
         }
         return response;
+    }
+
+    private static String translationPreview(String body) {
+        if (body == null) {
+            return null;
+        }
+
+        List<String> paragraphs = normalizeNewlines(body).lines()
+                .filter(line -> !line.strip().isEmpty())
+                .limit(TRANSLATION_PREVIEW_PARAGRAPHS + 1L)
+                .toList();
+        String candidate = String.join("\n", paragraphs.subList(0,
+                Math.min(paragraphs.size(), TRANSLATION_PREVIEW_PARAGRAPHS)));
+        int length = candidate.length();
+        if (paragraphs.size() <= TRANSLATION_PREVIEW_PARAGRAPHS && length <= TRANSLATION_PREVIEW_LENGTH) {
+            return length < 2 ? null : truncateWithEllipsis(candidate, length / 2);
+        }
+        return length <= TRANSLATION_PREVIEW_LENGTH
+                ? candidate
+                : truncateWithEllipsis(candidate, TRANSLATION_PREVIEW_LENGTH - 1);
+    }
+
+    private static String normalizeNewlines(String body) {
+        return body.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    private static String hqPreview(String body) {
+        if (body == null) {
+            return null;
+        }
+
+        String[] lines = normalizeNewlines(body).split("\n", -1);
+        return String.join("\n", Arrays.copyOf(lines, Math.min(lines.length, HQ_PREVIEW_LINES)));
+    }
+
+    private static String truncateWithEllipsis(String text, int end) {
+        if (Character.isHighSurrogate(text.charAt(end - 1))) {
+            end--;
+        }
+        return text.substring(0, end) + "…";
     }
 }

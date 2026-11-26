@@ -1,7 +1,6 @@
 package jp.smartbrief.billing.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -11,6 +10,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -57,6 +58,7 @@ class AuditLeftoversIntegrationTest {
 
     private static final int STANDARD_WORK_ID = 2001;
     private static final int HQ_WORK_ID = 2002;
+    private static final String MULTILINE_BODY = "一\r\n\r\n三\r四\n五\r\n六\n七\n八\r九\r\n十\n十一\n十二\n";
 
     @Autowired
     private WebTestClient webTestClient;
@@ -85,22 +87,8 @@ class AuditLeftoversIntegrationTest {
         databaseClient.sql("DELETE FROM processed_stripe_events").fetch().rowsUpdated().block();
         databaseClient.sql("DELETE FROM users").fetch().rowsUpdated().block();
 
-        when(workRepository.findById(anyInt())).thenAnswer(inv -> {
-            Integer id = inv.getArgument(0);
-            if (id != null && (id == STANDARD_WORK_ID || id == HQ_WORK_ID)) {
-                return Mono.just(Work.builder()
-                        .id(id)
-                        .title("上限検証作品")
-                        .authorName("テスト作家")
-                        .category("AOZORA")
-                        .summary300("要約")
-                        .summaryHq(id == HQ_WORK_ID ? "HQ要約" : null)
-                        .isHq(id == HQ_WORK_ID)
-                        .bodyText("本文")
-                        .build());
-            }
-            return Mono.empty();
-        });
+        stubWork(STANDARD_WORK_ID, "本文");
+        stubWork(HQ_WORK_ID, "本文");
 
         verifiedFreeUser = userRepository.save(User.builder()
                 .username("audit_free_user")
@@ -232,6 +220,75 @@ class AuditLeftoversIntegrationTest {
                 .jsonPath("$.bodyText").isEqualTo("本文");
 
         assertViewState(HQ_WORK_ID, 0, null, 1);
+    }
+
+    @Test
+    void lockedHqDetailReturnsFirstTenRawLines() {
+        stubWork(HQ_WORK_ID, MULTILINE_BODY);
+
+        assertBookDetail(HQ_WORK_ID, true)
+                .jsonPath("$.translationRestricted").isEqualTo(false)
+                .jsonPath("$.summaryText").isEqualTo("要約")
+                .jsonPath("$.insight").isEqualTo("考察")
+                .jsonPath("$.summaryHq").doesNotExist()
+                .jsonPath("$.bodyText").isEqualTo("一\n\n三\n四\n五\n六\n七\n八\n九\n十");
+    }
+
+    @Test
+    void lockedHqDetailPreservesTrailingEmptyLinesWithinPreview() {
+        stubWork(HQ_WORK_ID, "一\r\n二\r\r");
+
+        assertBookDetail(HQ_WORK_ID, true).jsonPath("$.bodyText").isEqualTo("一\n二\n\n");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void lockedHqDetailPreservesAbsentOrEmptyBody(String body) {
+        stubWork(HQ_WORK_ID, body);
+
+        var bodyPath = assertBookDetail(HQ_WORK_ID, true).jsonPath("$.bodyText");
+        if (body == null) {
+            bodyPath.doesNotExist();
+        } else {
+            bodyPath.isEqualTo("");
+        }
+    }
+
+    @Test
+    void premiumHqDetailKeepsFullOriginalBody() {
+        stubWork(HQ_WORK_ID, MULTILINE_BODY);
+        verifiedFreeUser.setPlanType(User.Plan.PREMIUM.name());
+        verifiedFreeUser.setSubscriptionExpiresAt(LocalDateTime.now().plusDays(1));
+        userRepository.save(verifiedFreeUser).block();
+
+        assertBookDetail(HQ_WORK_ID, false)
+                .jsonPath("$.summaryText").isEqualTo("HQ要約")
+                .jsonPath("$.bodyText").isEqualTo(MULTILINE_BODY);
+    }
+
+    @Test
+    void freeStandardDetailKeepsFullOriginalBody() {
+        stubWork(STANDARD_WORK_ID, MULTILINE_BODY);
+
+        assertBookDetail(STANDARD_WORK_ID, false)
+                .jsonPath("$.translationRestricted").isEqualTo(false)
+                .jsonPath("$.summaryText").isEqualTo("要約")
+                .jsonPath("$.bodyText").isEqualTo(MULTILINE_BODY);
+    }
+
+    private void stubWork(int bookId, String body) {
+        boolean isHq = bookId == HQ_WORK_ID;
+        when(workRepository.findById(bookId)).thenReturn(Mono.just(Work.builder()
+                .id(bookId)
+                .title("上限検証作品")
+                .authorName("テスト作家")
+                .category("AOZORA")
+                .summary300("要約")
+                .summaryHq(isHq ? "HQ要約" : null)
+                .insight("考察")
+                .isHq(isHq)
+                .bodyText(body)
+                .build()));
     }
 
     private WebTestClient.BodyContentSpec assertBookDetail(int bookId, boolean locked) {
