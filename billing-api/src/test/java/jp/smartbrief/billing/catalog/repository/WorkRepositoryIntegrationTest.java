@@ -68,8 +68,8 @@ class WorkRepositoryIntegrationTest {
 
     @AfterEach
     void deleteWorks() {
-        execute("DELETE FROM works WHERE work_id IN (95001, 95002)");
-        execute("DELETE FROM aozora_db.works WHERE work_id IN (95001, 95002)");
+        execute("DELETE FROM works WHERE work_id IN (95001, 95002, 95003, 95004, 95005, 95006)");
+        execute("DELETE FROM aozora_db.works WHERE work_id IN (95001, 95002, 95003, 95004, 95005, 95006)");
     }
 
     @Test
@@ -126,6 +126,100 @@ class WorkRepositoryIntegrationTest {
                 .collectList().block(TIMEOUT);
 
         assertThat(works).extracting(Work::getId).containsExactly(LONG_WORK_ID, SHORT_WORK_ID);
+    }
+
+    @Test
+    void generatedLengthsFollowInsertUpdateAndNulls() {
+        insertLengthFixtures();
+        assertGeneratedLengths(95003, new TextLengths(2, 3));
+        assertGeneratedLengths(95006, new TextLengths(null, null));
+
+        execute("UPDATE aozora_db.works SET full_text = '四文字分', body_text = NULL WHERE work_id = 95003");
+        execute("UPDATE aozora_db.works SET full_text = NULL, body_text = '翻訳' WHERE work_id = 95006");
+        assertGeneratedLengths(95003, new TextLengths(4, null));
+        assertGeneratedLengths(95006, new TextLengths(null, 2));
+    }
+
+    @Test
+    void keywordLengthOrderMatchesCharLengthWithTiesAndNulls() {
+        insertLengthFixtures();
+        var previousOrder = databaseClient.sql("""
+                SELECT work_id FROM aozora_db.works
+                WHERE (title LIKE :pattern OR author_name LIKE :pattern) AND full_text IS NOT NULL
+                ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT 10 OFFSET 0
+                """).bind("pattern", "%Length fixture%")
+                .mapValue(Integer.class).all().collectList().block(TIMEOUT);
+        var works = workRepository.searchByKeywordOrderByLength("%Length fixture%", 10, 0)
+                .collectList().block(TIMEOUT);
+
+        assertThat(previousOrder).containsExactly(95004, 95005, 95003);
+        assertThat(works).extracting(Work::getId).containsExactlyElementsOf(previousOrder);
+    }
+
+    @Test
+    void genreLengthOrderMatchesCharLengthWithTiesAndNulls() {
+        insertLengthFixtures();
+        var previousOrder = databaseClient.sql("""
+                SELECT work_id FROM works
+                WHERE genre_tag LIKE :pattern AND full_text IS NOT NULL
+                ORDER BY CHAR_LENGTH(full_text) DESC, work_id ASC LIMIT 10 OFFSET 0
+                """).bind("pattern", "%Length fixture%")
+                .mapValue(Integer.class).all().collectList().block(TIMEOUT);
+        var works = workRepository.findByGenreTagContainingOrderByLength("%Length fixture%", 10, 0)
+                .collectList().block(TIMEOUT);
+
+        assertThat(previousOrder).containsExactly(95004, 95005, 95003);
+        assertThat(works).extracting(Work::getId).containsExactlyElementsOf(previousOrder);
+    }
+
+    @Test
+    void categoryLengthOrderIntentionallyUsesCharactersInsteadOfBytes() {
+        insertLengthFixtures();
+        var byteOrder = databaseClient.sql("""
+                SELECT work_id FROM works WHERE category = 'length_fixture'
+                ORDER BY LENGTH(body_text) DESC, work_id ASC LIMIT 10 OFFSET 0
+                """).mapValue(Integer.class).all().collectList().block(TIMEOUT);
+        var works = workRepository.findByCategoryOrderByLength("length_fixture", 10, 0)
+                .collectList().block(TIMEOUT);
+
+        assertThat(byteOrder).containsExactly(95003, 95004, 95005, 95006);
+        assertThat(works).extracting(Work::getId).containsExactly(95004, 95005, 95003, 95006);
+    }
+
+    private void insertLengthFixtures() {
+        execute("""
+                INSERT INTO aozora_db.works (work_id, title, author_name, genre_tag, category, full_text, body_text)
+                VALUES (95003, 'Length fixture short', 'Author', 'A Length fixture tag', 'length_fixture', '短文', '日本語'),
+                       (95004, 'Long', 'Length fixture author', 'A Length fixture tag', 'length_fixture', 'abcd', 'abcdefg'),
+                       (95005, 'Length fixture tie', 'Author', 'A Length fixture tag', 'length_fixture', '同じ長さ', '1234567'),
+                       (95006, 'Length fixture null', 'Author', 'A Length fixture tag', 'length_fixture', NULL, NULL)
+                """);
+        execute("""
+                INSERT INTO works (work_id, title, author_name, genre_tag, category, full_text, body_text)
+                SELECT work_id, title, author_name, genre_tag, category, full_text, body_text
+                FROM aozora_db.works WHERE work_id IN (95003, 95004, 95005, 95006)
+                """);
+    }
+
+    private void assertGeneratedLengths(int workId, TextLengths expected) {
+        var lengths = databaseClient.sql("""
+                SELECT full_text_len, body_text_len, CHAR_LENGTH(full_text) AS full_chars,
+                       CHAR_LENGTH(body_text) AS body_chars
+                FROM aozora_db.works WHERE work_id = :id
+                """).bind("id", workId)
+                .map((row, metadata) -> {
+                    var generated = new TextLengths(row.get("full_text_len", Integer.class),
+                            row.get("body_text_len", Integer.class));
+                    var computed = new TextLengths(row.get("full_chars", Integer.class),
+                            row.get("body_chars", Integer.class));
+                    assertThat(generated).isEqualTo(computed);
+                    return generated;
+                }).one().block(TIMEOUT);
+
+        assertThat(lengths).isEqualTo(expected);
+    }
+
+    private record TextLengths(Integer full, Integer body) {
     }
 
     private void execute(String sql) {

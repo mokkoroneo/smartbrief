@@ -54,7 +54,11 @@ CREATE TABLE IF NOT EXISTS works (
     summary_short TEXT,
     summary_long TEXT,
     body_text LONGTEXT,
-    full_text LONGTEXT
+    full_text LONGTEXT,
+    full_text_len INT GENERATED ALWAYS AS (CHAR_LENGTH(full_text)) STORED,
+    body_text_len INT GENERATED ALWAYS AS (CHAR_LENGTH(body_text)) STORED,
+    INDEX idx_works_full_text_len (full_text_len DESC, work_id ASC),
+    INDEX idx_works_category_body_len (category, body_text_len DESC, work_id ASC)
 );
 
 -- ==========================================
