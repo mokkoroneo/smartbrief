@@ -13,6 +13,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Configuration;
@@ -36,6 +39,7 @@ import jp.smartbrief.billing.shared.util.RequestLoggingFilter;
 import reactor.core.publisher.Mono;
 
 @SpringJUnitConfig(HealthControllerTest.WebConfig.class)
+@ExtendWith(MockitoExtension.class)
 class HealthControllerTest {
 
     @Configuration(proxyBeanMethods = false)
@@ -54,6 +58,9 @@ class HealthControllerTest {
     @MockitoBean
     private UserRepository userRepository;
 
+    @Mock
+    private FetchSpec<Map<String, Object>> rows;
+
     @Autowired
     private ApplicationContext context;
 
@@ -65,7 +72,6 @@ class HealthControllerTest {
         client = WebTestClient.bindToApplicationContext(context).apply(springSecurity())
                 .configureClient().responseTimeout(Duration.ofSeconds(10)).build();
         database = mock(DatabaseClient.class);
-        when(primaryDatabase.getDatabaseClient()).thenReturn(database);
     }
 
     @Test
@@ -120,8 +126,7 @@ class HealthControllerTest {
 
     private void probeReturns(Mono<Map<String, Object>> result) {
         DatabaseClient.GenericExecuteSpec statement = mock(DatabaseClient.GenericExecuteSpec.class);
-        @SuppressWarnings("unchecked")
-        FetchSpec<Map<String, Object>> rows = mock(FetchSpec.class);
+        when(primaryDatabase.getDatabaseClient()).thenReturn(database);
         when(database.sql("SELECT 1")).thenReturn(statement);
         when(statement.fetch()).thenReturn(rows);
         when(rows.one()).thenReturn(result);
