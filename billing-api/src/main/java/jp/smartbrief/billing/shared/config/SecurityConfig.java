@@ -69,6 +69,7 @@ public class SecurityConfig {
                 .pathMatchers(HttpMethod.OPTIONS).permitAll()
                 
                 // 2. 公開エンドポイント（ログイン、Webhook、一般公開情報）
+                .pathMatchers(HttpMethod.GET, "/healthz").permitAll()
                 .pathMatchers("/api/v1/auth/**").permitAll()
                 .pathMatchers("/api/v1/stripe/webhook").permitAll() 
                 .pathMatchers(
