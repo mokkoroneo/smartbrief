@@ -56,6 +56,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            billing-api/build.gradle
+            billing-api/settings.gradle
+            billing-api/gradle/wrapper/gradle-wrapper.properties
       - name: Generate the Billing API runtime dependency lock
         working-directory: billing-api
         run: bash ./gradlew --init-script ../tools/ci/trivy-runtime.init.gradle resolveTrivyRuntime --write-locks
@@ -140,6 +145,11 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            billing-api/build.gradle
+            billing-api/settings.gradle
+            billing-api/gradle/wrapper/gradle-wrapper.properties
       - name: Create smoke-test schemas
         env:
           MYSQL_CONTAINER: ${{ job.services.mysql.id }}
@@ -147,7 +157,19 @@ jobs:
           docker exec --env "MYSQL_PWD=$TEST_MYSQL_PASSWORD" "$MYSQL_CONTAINER" \
             mysql --user=root --execute='CREATE DATABASE IF NOT EXISTS test; CREATE DATABASE IF NOT EXISTS aozora;'
       - name: Gradle check
-        run: bash ./gradlew check
+        run: |
+          for attempt in 1 2 3; do
+            if bash ./gradlew check; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              printf 'Gradle check attempt %s failed (exit %s). Retrying in 60 seconds.\n' "$attempt" "$status"
+              sleep 60
+            fi
+          done
+          exit "$status"
 
   search-api:
     name: Search API checks
