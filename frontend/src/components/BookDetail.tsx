@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
+import type { Root, RootContent } from 'mdast';
 import { useNavigate } from 'react-router-dom';
 import Footer from './Footer';
 import { theme } from '../theme';
@@ -64,6 +65,22 @@ const parseCatchphrase = (text: string | undefined) => {
   return match ? { tag: match[1], text: match[2] } : { tag: null, text: text };
 };
 
+/** Markdown 解析後のテキストに残った二連アスタリスクを除く。 */
+const normalizeStrayBoldMarkers = (text: string): string =>
+  text.replace(/(?<!\*)\*\*(?!\*)/g, '');
+
+const remarkStripStrayBoldMarkers = () => (tree: Root) => {
+  const stripTextMarkers = (node: Root | RootContent) => {
+    if (node.type === 'text') {
+      node.value = normalizeStrayBoldMarkers(node.value);
+    } else if ('children' in node) {
+      node.children.forEach(stripTextMarkers);
+    }
+  };
+
+  stripTextMarkers(tree);
+};
+
 // --- サブコンポーネント ---
 
 const SummaryMarkdown = ({ text, paragraphStyle }: { text: string; paragraphStyle: React.CSSProperties }) => {
@@ -72,7 +89,7 @@ const SummaryMarkdown = ({ text, paragraphStyle }: { text: string; paragraphStyl
   return (
     <div style={textStyle}>
       <ReactMarkdown
-        remarkPlugins={[remarkBreaks]}
+        remarkPlugins={[remarkBreaks, remarkStripStrayBoldMarkers]}
         skipHtml
         disallowedElements={['img']}
         components={{
