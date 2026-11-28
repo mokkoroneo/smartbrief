@@ -1,0 +1,192 @@
+name: Stage 3 CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan all PR commits
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --mount "type=bind,source=$PWD,target=/repo,readonly" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 git --redact --ignore-gitleaks-allow \
+            --log-opts="--diff-merges=first-parent ${PR_BASE}..${PR_HEAD}" /repo
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan new findings since the PR base
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            --mount "type=bind,source=$PWD,target=/src" --workdir /src \
+            semgrep/semgrep:1.187.0 semgrep scan --error --strict --disable-nosem --metrics off \
+            --config p/default --config p/java --config p/typescript --config p/golang \
+            --config p/rust --config p/dockerfile --config p/github-actions \
+            --baseline-commit "$PR_BASE" .
+
+  trivy:
+    name: Trivy production dependencies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Generate the Billing API runtime dependency lock
+        working-directory: billing-api
+        run: bash ./gradlew --init-script ../tools/ci/trivy-runtime.init.gradle resolveTrivyRuntime --write-locks
+      - name: Scan production dependencies
+        id: scan
+        run: |
+          docker run --rm --mount "type=bind,source=$PWD,target=/src,readonly" \
+            aquasec/trivy:0.76.2 fs --scanners vuln --exit-code 1 \
+            --ignorefile /src/.trivyignore.yaml --format json --list-all-pkgs --show-suppressed /src \
+            > "$RUNNER_TEMP/trivy.json"
+      - name: Verify Billing API coverage and report findings
+        if: ${{ !cancelled() && steps.scan.outcome != 'skipped' }}
+        run: |
+          jq -e 'any(.Results[]?; .Target == "billing-api/gradle.lockfile" and .Type == "gradle" and ((.Packages // []) | length > 0))' "$RUNNER_TEMP/trivy.json"
+          jq -r '.Results[]? | .Target as $target | .Vulnerabilities[]? |
+            "\($target): \(.VulnerabilityID) \(.PkgName) \(.InstalledVersion) \(.Severity)"' "$RUNNER_TEMP/trivy.json"
+
+  path-risk:
+    name: Path risk and suppressions
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify PR and check added lines
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/ci/check_paths.py "$PR_BASE" "$PR_HEAD"
+
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Install locked dependencies
+        id: install
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+  billing-api:
+    name: Billing API checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: billing-api
+    env:
+      TEST_MYSQL_HOST: 127.0.0.1
+      TEST_MYSQL_PASSWORD: password
+    services:
+      mysql:
+        image: mysql:8.0.46
+        env:
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: smartbrief_test_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysql --protocol=TCP --host=127.0.0.1 --user=root --password=password --database=smartbrief_test_db --execute='SELECT 1'"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Create smoke-test schemas
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          docker exec --env "MYSQL_PWD=$TEST_MYSQL_PASSWORD" "$MYSQL_CONTAINER" \
+            mysql --user=root --execute='CREATE DATABASE IF NOT EXISTS test; CREATE DATABASE IF NOT EXISTS aozora;'
+      - name: Gradle check
+        run: bash ./gradlew check
+
+  search-api:
+    name: Search API checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: search-api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: search-api/go.mod
+          cache-dependency-path: search-api/go.sum
+      - name: Verify modules
+        run: go mod verify
+      - name: Vet
+        run: go vet ./...
+      - name: Tests
+        run: go test ./...
+      - name: Build
+        run: go build ./...
+
+  text-prep:
+    name: Text prep checks
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: tools/text-prep
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust
+        run: rustup toolchain install 1.92.0 --profile minimal --component rustfmt --component clippy
+      - name: Formatting
+        run: cargo +1.92.0 fmt --check
+      - name: Clippy
+        run: cargo +1.92.0 clippy --all-targets -- -D warnings
+      - name: Tests
+        run: cargo +1.92.0 test --locked

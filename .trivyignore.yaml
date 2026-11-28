@@ -1,0 +1,11 @@
+vulnerabilities:
+  - id: CVE-2026-78661
+    paths:
+      - search-api/go.mod
+    expired_at: 2026-12-12
+    statement: go.mod の golang.org/x/net v0.62.0 への更新を別PRで実施し、本ファイルごと削除予定
+  - id: CVE-2026-97045
+    paths:
+      - search-api/go.mod
+    expired_at: 2026-12-12
+    statement: go.mod の golang.org/x/net v0.62.0 への更新を別PRで実施し、本ファイルごと削除予定
