@@ -1,0 +1,12 @@
+// Resolve and lock only the dependencies shipped with the Billing API.
+gradle.projectsEvaluated {
+    def runtimeClasspath = rootProject.configurations.named('runtimeClasspath')
+    runtimeClasspath.configure {
+        resolutionStrategy.activateDependencyLocking()
+    }
+    rootProject.tasks.register('resolveTrivyRuntime') {
+        doLast {
+            runtimeClasspath.get().resolve()
+        }
+    }
+}

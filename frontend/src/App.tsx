@@ -47,7 +47,7 @@ const AppContent: React.FC = () => {
         showToast(res.message || '決済画面の取得に失敗しました', 'error');
         if (res.status === 401) logout();
       }
-    } catch (err) {
+    } catch {
       showToast('通信エラーが発生しました。', 'error');
     }
   };
@@ -61,7 +61,7 @@ const AppContent: React.FC = () => {
       } else {
         showToast(res.message || '管理画面の取得に失敗しました', 'error');
       }
-    } catch (err) {
+    } catch {
       showToast('通信エラーが発生しました。', 'error');
     }
   };

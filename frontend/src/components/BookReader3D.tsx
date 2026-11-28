@@ -1,6 +1,15 @@
 import React, { useRef, useState, useEffect, ReactNode } from 'react';
 import HTMLFlipBook from 'react-pageflip';
 
+type FlipBookProps = Omit<React.ComponentProps<typeof HTMLFlipBook>, 'ref'>;
+type FlipBookHandle = { pageFlip: () => unknown };
+
+// react-pageflip supplies defaults for the settings that its declarations require.
+const FlipBook = HTMLFlipBook as React.ExoticComponent<
+  Partial<FlipBookProps> & Pick<FlipBookProps, 'width' | 'height' | 'children'>
+  & React.RefAttributes<FlipBookHandle>
+>;
+
 // --- 1. 型定義 ---
 interface BookReader3DProps {
   title: string;
@@ -109,8 +118,7 @@ Page.displayName = 'Page'; // React DevTools用の設定
 
 // --- 3. メインコンポーネント ---
 const BookReader3D: React.FC<BookReader3DProps> = ({ title, bodyText, onClose }) => {
-  // react-pageflipのrefは特殊なため、ここでは any で回避します
-  const bookRef = useRef<any>(null);
+  const bookRef = useRef<FlipBookHandle>(null);
   
   // BookSettingsの型を適用
   const [bookSettings, setBookSettings] = useState<BookSettings>({
@@ -165,9 +173,7 @@ const BookReader3D: React.FC<BookReader3DProps> = ({ title, bodyText, onClose })
       <button onClick={onClose} style={styles.closeBtn}>× 閉じる</button>
       
       <div style={styles.bookContainer}>
-        {/* ↓ この1行を追加して、ライブラリの型定義の不備を無視します */}
-        {/* @ts-ignore: react-pageflipの型定義が古いため、不要なPropsの要求を無視 */}
-        <HTMLFlipBook 
+        <FlipBook
           width={bookSettings.width} 
           height={bookSettings.height} 
           size="fixed"
@@ -181,7 +187,6 @@ const BookReader3D: React.FC<BookReader3DProps> = ({ title, bodyText, onClose })
           className="flip-book"
           ref={bookRef}
           key={bookSettings.isMobile ? 'mobile' : 'pc'}
-          // ★ TSエラー回避のため、styleプロップスは不要な場合は省略するか正しい型を渡す
         >
           <Page number="" title="" isCover={true} fontSize={bookSettings.fontSize} isMobile={bookSettings.isMobile}>
              <div style={{...styles.pageInterior, ...styles.coverPage}}>
@@ -212,7 +217,7 @@ const BookReader3D: React.FC<BookReader3DProps> = ({ title, bodyText, onClose })
                 </div>
              </div>
           </Page>
-        </HTMLFlipBook>
+        </FlipBook>
       </div>
     </div>
   );
