@@ -180,8 +180,8 @@ const BookDetail: React.FC<BookDetailProps> = ({ bookId, onBack }) => {
           else throw new Error('本の情報を取得できませんでした');
           if (favData) setIsFavorite(favData.isFavorite);
         }
-      } catch (err: any) {
-        if (isMounted) setError(err.message);
+      } catch (err) {
+        if (isMounted) setError((err as Error).message);
       } finally {
         if (isMounted) setSettledRequest(request);
       }

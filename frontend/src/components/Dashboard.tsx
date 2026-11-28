@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Footer from './Footer';
 import { theme } from '../theme';
 import { apiClient } from '../utils/apiClient';
 import { useToast } from '../contexts/ToastContext';

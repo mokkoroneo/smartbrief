@@ -3,12 +3,13 @@ import { useAuthStore } from '../store/authStore';
 const BASE_URL = '/api/v1';
 
 // 1. レスポンスの基本形を定義
-interface ApiResponse<T = any> {
-  ok: boolean;
+type ApiResponse<T> = {
   status: number;
-  data: T;
   message?: string;
-}
+} & (
+  | { ok: true; data: T }
+  | { ok: false; data: unknown }
+);
 
 interface RequestOptions {
   logoutOnUnauthorized?: boolean;
@@ -16,15 +17,15 @@ interface RequestOptions {
 
 export const apiClient = {
   get: <T>(endpoint: string, options?: RequestOptions) => request<T>(endpoint, 'GET', null, options),
-  post: <T>(endpoint: string, body?: any) => request<T>(endpoint, 'POST', body),
-  put: <T>(endpoint: string, body?: any) => request<T>(endpoint, 'PUT', body),
+  post: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, 'POST', body),
+  put: <T>(endpoint: string, body?: unknown) => request<T>(endpoint, 'PUT', body),
   delete: <T>(endpoint: string) => request<T>(endpoint, 'DELETE'),
 };
 
 async function request<T>(
   endpoint: string,
   method: string,
-  body: any = null,
+  body: unknown = null,
   { logoutOnUnauthorized = true }: RequestOptions = {},
 ): Promise<ApiResponse<T>> {
   try {
@@ -45,7 +46,7 @@ async function request<T>(
     }
 
     // ★ 修正後：Content-Typeを見て、JSONかテキストかをスマートに判別
-    let data: any = null;
+    let data: unknown = null;
     const isJson = res.headers.get('content-type')?.includes('application/json');
 
     try {
@@ -62,7 +63,8 @@ async function request<T>(
       if (typeof data === 'string' && data.trim().length > 0) {
         finalMsg = data;
       } else if (data && typeof data === 'object') {
-        finalMsg = data.message || data.error || data.detail || finalMsg;
+        const error = data as { message?: string; error?: string; detail?: string };
+        finalMsg = error.message || error.error || error.detail || finalMsg;
       }
 
       return { ok: false, status: res.status, message: finalMsg, data };
@@ -73,6 +75,6 @@ async function request<T>(
 
   } catch (err) {
     console.error('API Error:', err);
-    return { ok: false, status: 0, message: '通信エラーが発生しました。', data: null as any };
+    return { ok: false, status: 0, message: '通信エラーが発生しました。', data: null };
   }
 }
